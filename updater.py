@@ -27,7 +27,10 @@ logger = logging.getLogger("updater")
 # Ejemplo: "tu_usuario/tu_repositorio"
 DEFAULT_GITHUB_REPO = "javmarina/ros2_docker_sim"
 
-# URL directa al version.json en la rama principal (raw.githubusercontent.com)
+# URL de la API de GitHub para obtener version.json en tiempo real (sin la caché de 5 minutos de Fastly CDN)
+DEFAULT_API_VERSION_URL = f"https://api.github.com/repos/{DEFAULT_GITHUB_REPO}/contents/version.json?ref=main"
+
+# URL directa al version.json en la rama principal (raw.githubusercontent.com - caché CDN de ~5 min)
 DEFAULT_VERSION_URL = f"https://raw.githubusercontent.com/{DEFAULT_GITHUB_REPO}/main/version.json"
 
 # URL de respaldo automático para descargar el archivo zip de la rama principal de GitHub
@@ -78,45 +81,55 @@ def is_newer_version(remote_ver: str, local_ver: str = CURRENT_VERSION) -> bool:
         return False
 
 
-def fetch_remote_version(version_url: str = DEFAULT_VERSION_URL, timeout: float = 2.0) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+def fetch_remote_version(
+    version_url: str = DEFAULT_VERSION_URL,
+    timeout: float = 3.0,
+    repo: str = DEFAULT_GITHUB_REPO
+) -> Tuple[bool, Optional[Dict[str, Any]], str]:
     """
-    Comprueba si hay una nueva versión en GitHub mediante HTTP GET con timeout corto.
+    Comprueba si hay una nueva versión en GitHub mediante HTTP GET.
+    Prioriza la API directa de GitHub para evitar la caché de 5 minutos de Fastly CDN (raw.githubusercontent.com).
     Retorna: (hay_conexion_exitosa, dict_version, mensaje)
     """
-    logger.info("fetch_remote_version: Consultando URL '%s' (timeout: %ss)", version_url, timeout)
+    logger.info("fetch_remote_version: Consultando versiones remotas (timeout: %ss)...", timeout)
 
     # Si aún no se ha configurado el repositorio real, omitir silenciosamente
-    if "usuario/repo" in version_url:
+    if "usuario/repo" in version_url or "usuario/repo" in repo:
         msg = "Repositorio de GitHub pendiente de configurar por el profesor (se mantiene 'usuario/repo')."
         logger.warning("fetch_remote_version: %s", msg)
         return False, None, msg
 
-    try:
-        req = urllib.request.Request(
-            version_url,
-            headers={"User-Agent": f"ROS2-Nav-Launcher/{CURRENT_VERSION}"}
-        )
-        logger.debug("fetch_remote_version: Enviando petición HTTP GET...")
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            logger.debug("fetch_remote_version: Respuesta HTTP código %s", response.status)
-            if response.status == 200:
-                raw_data = response.read().decode("utf-8")
-                logger.debug("fetch_remote_version: Contenido recibido:\n%s", raw_data.strip())
-                data = json.loads(raw_data)
-                return True, data, "Comprobación exitosa."
-            return False, None, f"Respuesta HTTP {response.status}."
-    except urllib.error.URLError as e:
-        err_msg = f"Error de red o sin conexión a internet: {e.reason}"
-        logger.warning("fetch_remote_version: %s", err_msg)
-        return False, None, err_msg
-    except json.JSONDecodeError as e:
-        err_msg = f"El archivo de versión remoto no tiene formato JSON válido: {e}"
-        logger.error("fetch_remote_version: %s", err_msg)
-        return False, None, err_msg
-    except Exception as e:
-        err_msg = f"No se pudo comprobar la versión: {str(e)}"
-        logger.error("fetch_remote_version: %s", err_msg, exc_info=True)
-        return False, None, err_msg
+    api_url = f"https://api.github.com/repos/{repo}/contents/version.json?ref=main"
+    urls_to_try = [
+        (api_url, {"Accept": "application/vnd.github.v3.raw", "User-Agent": f"ROS2-Nav-Launcher/{get_local_version()}"}, "API de GitHub (en vivo)"),
+        (version_url, {"User-Agent": f"ROS2-Nav-Launcher/{get_local_version()}", "Cache-Control": "no-cache", "Pragma": "no-cache"}, "raw.githubusercontent.com (CDN)")
+    ]
+
+    last_error = None
+    for url, headers, source_name in urls_to_try:
+        try:
+            logger.debug("fetch_remote_version: Enviando petición a %s: '%s'", source_name, url)
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                logger.debug("fetch_remote_version: Respuesta %s código HTTP %s", source_name, response.status)
+                if response.status == 200:
+                    raw_data = response.read().decode("utf-8")
+                    logger.debug("fetch_remote_version: Contenido recibido de %s:\n%s", source_name, raw_data.strip())
+                    data = json.loads(raw_data)
+                    return True, data, "Comprobación exitosa."
+        except urllib.error.HTTPError as e:
+            last_error = f"HTTP {e.code}: {e.reason}"
+            logger.debug("fetch_remote_version: %s devolvió %s", source_name, last_error)
+        except json.JSONDecodeError as e:
+            last_error = f"JSONDecodeError: {e}"
+            logger.warning("fetch_remote_version: %s no devolvió JSON válido: %s", source_name, e)
+        except Exception as e:
+            last_error = str(e)
+            logger.debug("fetch_remote_version: Error conectando con %s: %s", source_name, e)
+
+    err_msg = f"No se pudo comprobar la versión remota ({last_error})."
+    logger.warning("fetch_remote_version: %s", err_msg)
+    return False, None, err_msg
 
 
 def check_for_updates(
