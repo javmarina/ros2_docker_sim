@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("launcher")
 
-# --- Habilitar High-DPI en Windows (elimina texto borroso y renderiza a resolución nativa) ---
+# --- Habilitar High-DPI y AppUserModelID en Windows ---
 if platform.system().lower() == "windows":
     import ctypes
     try:
@@ -34,6 +34,15 @@ if platform.system().lower() == "windows":
             ctypes.windll.user32.SetProcessDPIAware()
         except Exception:
             pass
+
+    try:
+        # Identificador explícito de aplicación para Windows Taskbar:
+        # Permite que la barra de tareas de Windows muestre el icono personalizado de la app
+        # en lugar de agruparla bajo python.exe con el icono genérico de Python.
+        app_id = "lasalle.sistemasdenavegacion.ros2launcher.v1"
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    except Exception:
+        pass
 
 # Módulos del proyecto
 from config_store import ConfigStore
@@ -56,6 +65,7 @@ from updater import (
     UpdateModalDialog,
     DEFAULT_GITHUB_REPO
 )
+from embedded_icon import get_app_icon_path
 
 # Dockerfile de respaldo en caso de que no exista en el directorio
 DOCKERFILE_CONTENT = r"""# Dockerfile for University Course on Navigation and ROS 2 Jazzy
@@ -162,6 +172,9 @@ class ModernSimulationLauncher:
         self.root.geometry("1000x620")
         self.root.minsize(850, 480)
 
+        # Configurar icono de la aplicación (barra de tareas y esquina de ventana)
+        self._setup_window_icon()
+
         # Gestor de configuración persistente (guarda en AppData)
         self.config_store = ConfigStore(fallback_dir=Path(__file__).parent.resolve())
 
@@ -180,6 +193,49 @@ class ModernSimulationLauncher:
         self._load_saved_preferences()
         self._check_docker_live_status()
         self.root.after(1500, self._check_for_updates_background)
+
+    def _setup_window_icon(self):
+        """Configura el icono nativo de la ventana (esquina superior) y barra de tareas de Windows."""
+        try:
+            ico_path = get_app_icon_path()
+            if ico_path and ico_path.is_file():
+                self.root.iconbitmap(default=str(ico_path))
+                self.root.iconbitmap(str(ico_path))
+                logger.info(f"Icono de aplicación (.ico) configurado exitosamente: {ico_path}")
+
+                # Refuerzo nativo Win32: enviar explícitamente WM_SETICON y actualizar Class Icon
+                if platform.system().lower() == "windows":
+                    try:
+                        import ctypes
+                        user32 = ctypes.windll.user32
+                        WM_SETICON = 0x80
+                        IMAGE_ICON = 1
+                        LR_LOADFROMFILE = 0x10
+                        GA_ROOT = 2
+
+                        self.root.update_idletasks()
+                        hwnd = user32.GetAncestor(self.root.winfo_id(), GA_ROOT)
+                        if hwnd:
+                            h_small = user32.LoadImageW(None, str(ico_path), IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+                            h_big = user32.LoadImageW(None, str(ico_path), IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
+                            if h_small:
+                                user32.SendMessageW(hwnd, WM_SETICON, 0, h_small)  # ICON_SMALL
+                                try:
+                                    user32.SetClassLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+                                    user32.SetClassLongPtrW(hwnd, -34, h_small)      # GCLP_HICONSM
+                                except Exception:
+                                    pass
+                            if h_big:
+                                user32.SendMessageW(hwnd, WM_SETICON, 1, h_big)    # ICON_BIG
+                                try:
+                                    user32.SetClassLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+                                    user32.SetClassLongPtrW(hwnd, -14, h_big)        # GCLP_HICON
+                                except Exception:
+                                    pass
+                    except Exception as win_err:
+                        logger.debug(f"Ajuste Win32 WM_SETICON omitido: {win_err}")
+        except Exception as e:
+            logger.warning(f"No se pudo configurar el icono de la ventana: {e}")
 
     def _init_styles(self):
         """Configura el tema nativo de Windows (vista) y paleta de colores limpia."""
@@ -1530,6 +1586,16 @@ B. Navegación Autónoma con Nav2:
 
 def main():
     root = tk.Tk()
+    
+    # Pre-configurar icono de forma temprana para que la barra de tareas de Windows lo detecte al mapear la ventana
+    try:
+        early_ico = get_app_icon_path()
+        if early_ico and early_ico.is_file():
+            root.iconbitmap(default=str(early_ico))
+            root.iconbitmap(str(early_ico))
+    except Exception:
+        pass
+
     app = ModernSimulationLauncher(root)
     root.mainloop()
 
