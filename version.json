@@ -1,0 +1,6 @@
+{
+  "version": "1.0.0",
+  "release_date": "2026-09-13",
+  "changelog": "Versión inicial del Launcher de Simulación: Soporte para TurtleBot 4 y TIAGo con Nav2, SLAM Toolbox, terminal Docker nativa y espacio de trabajo persistente.",
+  "download_url": "https://raw.githubusercontent.com/usuario/repo/main/launcher_update.zip"
+}
