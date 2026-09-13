@@ -37,14 +37,21 @@ def parse_version(v_str: str) -> Tuple[int, ...]:
     for chunk in cleaned.split('.'):
         num_str = ''.join(filter(str.isdigit, chunk))
         parts.append(int(num_str) if num_str else 0)
-    return tuple(parts)
+    result = tuple(parts)
+    print(f"[DEBUG Updater] parse_version('{v_str}') -> {result}")
+    return result
 
 
 def is_newer_version(remote_ver: str, local_ver: str = CURRENT_VERSION) -> bool:
     """Retorna True si remote_ver es estrictamente superior a local_ver."""
     try:
-        return parse_version(remote_ver) > parse_version(local_ver)
-    except Exception:
+        remote_tuple = parse_version(remote_ver)
+        local_tuple = parse_version(local_ver)
+        newer = remote_tuple > local_tuple
+        print(f"[DEBUG Updater] is_newer_version: remote {remote_tuple} > local {local_tuple} -> {newer}")
+        return newer
+    except Exception as e:
+        print(f"[DEBUG Updater] is_newer_version ERROR: {e}")
         return False
 
 
@@ -53,27 +60,40 @@ def fetch_remote_version(version_url: str = DEFAULT_VERSION_URL, timeout: float 
     Comprueba si hay una nueva versión en GitHub mediante HTTP GET con timeout corto.
     Retorna: (hay_conexion_exitosa, dict_version, mensaje)
     """
+    print(f"[DEBUG Updater] fetch_remote_version: Consultando URL: '{version_url}' (timeout: {timeout}s)")
+
     # Si aún no se ha configurado el repositorio real, omitir silenciosamente
     if "usuario/repo" in version_url:
-        return False, None, "Repositorio de GitHub pendiente de configurar por el profesor."
+        msg = "Repositorio de GitHub pendiente de configurar por el profesor (se mantiene 'usuario/repo')."
+        print(f"[DEBUG Updater] fetch_remote_version: {msg}")
+        return False, None, msg
 
     try:
         req = urllib.request.Request(
             version_url,
             headers={"User-Agent": f"ROS2-Nav-Launcher/{CURRENT_VERSION}"}
         )
+        print("[DEBUG Updater] fetch_remote_version: Enviando petición HTTP GET...")
         with urllib.request.urlopen(req, timeout=timeout) as response:
+            print(f"[DEBUG Updater] fetch_remote_version: Respuesta HTTP código {response.status}")
             if response.status == 200:
                 raw_data = response.read().decode("utf-8")
+                print(f"[DEBUG Updater] fetch_remote_version: Contenido recibido:\n{raw_data.strip()}")
                 data = json.loads(raw_data)
                 return True, data, "Comprobación exitosa."
             return False, None, f"Respuesta HTTP {response.status}."
     except urllib.error.URLError as e:
-        return False, None, f"Error de red o sin conexión a internet: {e.reason}"
-    except json.JSONDecodeError:
-        return False, None, "El archivo de versión remoto no tiene formato JSON válido."
+        err_msg = f"Error de red o sin conexión a internet: {e.reason}"
+        print(f"[DEBUG Updater] fetch_remote_version: {err_msg}")
+        return False, None, err_msg
+    except json.JSONDecodeError as e:
+        err_msg = f"El archivo de versión remoto no tiene formato JSON válido: {e}"
+        print(f"[DEBUG Updater] fetch_remote_version: {err_msg}")
+        return False, None, err_msg
     except Exception as e:
-        return False, None, f"No se pudo comprobar la versión: {str(e)}"
+        err_msg = f"No se pudo comprobar la versión: {str(e)}"
+        print(f"[DEBUG Updater] fetch_remote_version: {err_msg}")
+        return False, None, err_msg
 
 
 def check_for_updates(
@@ -84,15 +104,23 @@ def check_for_updates(
     Función principal de comprobación:
     Retorna (hay_actualizacion_disponible, info_dict, mensaje)
     """
+    print(f"\n[DEBUG Updater] --- Iniciando comprobación de actualizaciones ---")
+    print(f"[DEBUG Updater] Versión local instalada: v{CURRENT_VERSION}")
     ok, data, msg = fetch_remote_version(version_url, timeout=timeout)
     if not ok or not data:
+        print(f"[DEBUG Updater] check_for_updates: No se pudo obtener versión remota ({msg})")
         return False, None, msg
 
     remote_ver = data.get("version", "")
+    print(f"[DEBUG Updater] Versión remota encontrada: v{remote_ver}")
     if is_newer_version(remote_ver, CURRENT_VERSION):
-        return True, data, f"Nueva versión {remote_ver} disponible (actual: {CURRENT_VERSION})."
+        msg = f"Nueva versión {remote_ver} disponible (actual: {CURRENT_VERSION})."
+        print(f"[DEBUG Updater] check_for_updates: ¡HAY ACTUALIZACIÓN DISPONIBLE! -> {msg}")
+        return True, data, msg
     else:
-        return False, data, f"Ya tienes la última versión ({CURRENT_VERSION})."
+        msg = f"Ya tienes la última versión ({CURRENT_VERSION})."
+        print(f"[DEBUG Updater] check_for_updates: El sistema está al día -> {msg}")
+        return False, data, msg
 
 
 def download_and_extract_update(
@@ -104,8 +132,14 @@ def download_and_extract_update(
     Descarga el paquete .zip de la nueva versión con reporte de progreso
     y extrae los archivos sobreescribiendo los ficheros locales.
     """
+    print(f"\n[DEBUG Updater] --- Iniciando descarga y extracción de actualización ---")
+    print(f"[DEBUG Updater] URL de descarga: {download_url}")
+    print(f"[DEBUG Updater] Directorio destino: {target_dir}")
+
     if not download_url:
-        return False, "La URL de descarga de la actualización está vacía."
+        err_msg = "La URL de descarga de la actualización está vacía."
+        print(f"[DEBUG Updater] ERROR: {err_msg}")
+        return False, err_msg
 
     temp_zip = None
     try:
@@ -117,12 +151,14 @@ def download_and_extract_update(
 
         with urllib.request.urlopen(req, timeout=15.0) as response:
             total_size = int(response.headers.get("Content-Length", 0))
+            print(f"[DEBUG Updater] Tamaño reportado por servidor: {total_size} bytes")
             downloaded = 0
             block_size = 16384  # 16 KB
 
             # Guardar en archivo temporal
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
             temp_zip = Path(temp_file.name)
+            print(f"[DEBUG Updater] Guardando en archivo temporal: {temp_zip}")
 
             with open(temp_zip, "wb") as f:
                 while True:
@@ -137,33 +173,38 @@ def download_and_extract_update(
                     else:
                         progress_cb(-1, f"Descargando... ({downloaded // 1024} KB)")
 
+            print(f"[DEBUG Updater] Descarga completada ({downloaded} bytes descargados).")
+
         progress_cb(92.0, "Extrayendo archivos y aplicando cambios...")
 
         # Descomprimir en el directorio de destino
+        extracted_files = []
         with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
-            # Lista de archivos a extraer
             for member in zip_ref.namelist():
-                # Evitar extraer carpetas de sistema o rutas relativas peligrosas
                 filename = os.path.basename(member)
                 if not filename:
                     continue
-                # Si el archivo está dentro de un subdirectorio del zip (ej: repo-main/launch_simulation.py),
-                # extraer los archivos principales en target_dir
-                if filename.endswith(".py") or filename == "version.json":
+                if filename.endswith(".py") or filename in ("version.json", "Dockerfile"):
                     source = zip_ref.open(member)
                     dest_file = target_dir / filename
                     with open(dest_file, "wb") as target:
                         target.write(source.read())
+                    extracted_files.append(filename)
+                    print(f"[DEBUG Updater] Archivo extraído y reemplazado: '{filename}' -> {dest_file}")
 
+        print(f"[DEBUG Updater] Extracción finalizada con éxito. Archivos actualizados: {extracted_files}")
         progress_cb(100.0, "¡Actualización completada!")
         return True, "Archivos actualizados correctamente."
 
     except Exception as e:
-        return False, f"Error durante la actualización: {str(e)}"
+        err_msg = f"Error durante la actualización: {str(e)}"
+        print(f"[DEBUG Updater] ERROR en download_and_extract_update: {err_msg}")
+        return False, err_msg
     finally:
         if temp_zip and temp_zip.exists():
             try:
                 temp_zip.unlink()
+                print(f"[DEBUG Updater] Archivo temporal {temp_zip} eliminado.")
             except Exception:
                 pass
 
@@ -173,12 +214,14 @@ def restart_application():
     python_bin = sys.executable
     script_path = sys.argv[0]
     args = [python_bin, script_path] + sys.argv[1:]
+    print(f"[DEBUG Updater] restart_application: Reiniciando con comando: {' '.join(args)}")
     
     try:
         subprocess.Popen(args)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[DEBUG Updater] restart_application ERROR al relanzar proceso: {e}")
     sys.exit(0)
+
 
 
 class UpdateModalDialog(tk.Toplevel):

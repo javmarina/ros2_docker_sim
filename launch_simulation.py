@@ -148,7 +148,7 @@ class ModernSimulationLauncher:
 
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title(f"ROS 2 Jazzy - Launcher de Simulación (v{CURRENT_VERSION}) | Robótica Móvil")
+        self.root.title(f"ROS 2 Jazzy - Launcher de Simulación (v{CURRENT_VERSION}) | Sistemas de Navegación")
         # Dimensiones optimizadas para portátiles de 14" (1080p con 150% de escalado)
         self.root.geometry("1000x620")
         self.root.minsize(850, 480)
@@ -230,7 +230,7 @@ class ModernSimulationLauncher:
 
         sub_lbl = tk.Label(
             left_box,
-            text="Robótica Móvil · Gazebo Sim & Navigation2 (Nav2)",
+            text="Sistemas de Navegación · Gazebo Sim & Navigation2 (Nav2)",
             font=("Segoe UI", 8),
             bg="#ffffff",
             fg=self.text_muted
@@ -1017,9 +1017,12 @@ B. Navegación Autónoma con Nav2:
 
     def _check_for_updates_background(self):
         """Comprueba silenciosamente en segundo plano si hay actualizaciones al iniciar el launcher."""
+        print("\n[DEBUG Launcher] _check_for_updates_background: Iniciando comprobación silenciosa en background...")
         def _worker():
             has_update, info, msg = check_for_updates(timeout=2.0)
+            print(f"[DEBUG Launcher] _check_for_updates_background completado: has_update={has_update}, msg='{msg}'")
             if has_update and info:
+                print(f"[DEBUG Launcher] Actualización encontrada: v{info.get('version')}. Abriendo modal...")
                 self.root.after(0, lambda: self._prompt_update_available(info))
                 self.root.after(0, lambda: self.lbl_update_status.configure(
                     text=f"Nueva versión v{info.get('version')} disponible",
@@ -1035,24 +1038,29 @@ B. Navegación Autónoma con Nav2:
     def _prompt_update_available(self, update_info: dict):
         """Abre la ventana modal para ofrecer al alumno la actualización."""
         target_dir = Path(__file__).parent.resolve()
+        print(f"[DEBUG Launcher] _prompt_update_available: Mostrando ventana modal con target_dir={target_dir}")
         UpdateModalDialog(self.root, update_info, target_dir)
 
     def _on_manual_check_updates(self):
         """Comprobación manual invocada por el usuario desde la pestaña de Ajustes."""
+        print("\n[DEBUG Launcher] _on_manual_check_updates: Usuario pulsó 'Comprobar actualizaciones ahora'")
         self.btn_check_updates.configure(state="disabled")
         self.lbl_update_status.configure(text="Buscando nueva versión en GitHub...", fg=self.text_muted)
 
         def _worker():
             has_update, info, msg = check_for_updates(timeout=3.0)
+            print(f"[DEBUG Launcher] _on_manual_check_updates completado: has_update={has_update}, msg='{msg}'")
             self.root.after(0, lambda: self.btn_check_updates.configure(state="normal"))
 
             if has_update and info:
+                print(f"[DEBUG Launcher] Mostrando aviso de actualización disponible: v{info.get('version')}")
                 self.root.after(0, lambda: self.lbl_update_status.configure(
                     text=f"Nueva versión v{info.get('version')} disponible",
                     fg="#15803d"
                 ))
                 self.root.after(0, lambda: self._prompt_update_available(info))
             elif "pendiente" in msg.lower():
+                print(f"[DEBUG Launcher] Repositorio no configurado aún ({msg})")
                 self.root.after(0, lambda: self.lbl_update_status.configure(text=msg, fg="#b45309"))
                 self.root.after(0, lambda: messagebox.showinfo(
                     "Actualizaciones",
@@ -1060,6 +1068,7 @@ B. Navegación Autónoma con Nav2:
                     parent=self.root
                 ))
             elif info:
+                print(f"[DEBUG Launcher] El launcher está al día.")
                 self.root.after(0, lambda: self.lbl_update_status.configure(
                     text=f"Al día (v{CURRENT_VERSION})",
                     fg="#15803d"
@@ -1070,6 +1079,7 @@ B. Navegación Autónoma con Nav2:
                     parent=self.root
                 ))
             else:
+                print(f"[DEBUG Launcher] Error o timeout comprobando versión: {msg}")
                 self.root.after(0, lambda: self.lbl_update_status.configure(text=msg, fg="#b91c1c"))
                 self.root.after(0, lambda: messagebox.showwarning("Actualizaciones", msg, parent=self.root))
 

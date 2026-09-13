@@ -1,6 +1,6 @@
 # ROS 2 Jazzy Simulation Launcher
 
-Herramienta de simulación y navegación con **ROS 2 Jazzy**, **Gazebo Sim** y **Navigation2 (Nav2)** para la asignatura de **Robótica Móvil**.
+Herramienta de simulación y navegación con **ROS 2 Jazzy**, **Gazebo Sim** y **Navigation2 (Nav2)** para la asignatura de **Sistemas de Navegación**.
 
 ---
 
