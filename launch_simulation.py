@@ -5,6 +5,7 @@ Interfaz gráfica moderna, nativa de alta resolución (High-DPI) y modular con T
 
 import os
 import sys
+import logging
 import platform
 import threading
 import webbrowser
@@ -13,6 +14,14 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 from pathlib import Path
 from typing import Optional, Dict
+
+# --- Configuración del módulo logging estándar ---
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
+    datefmt="%H:%M:%S"
+)
+logger = logging.getLogger("launcher")
 
 # --- Habilitar High-DPI en Windows (elimina texto borroso y renderiza a resolución nativa) ---
 if platform.system().lower() == "windows":
@@ -1017,12 +1026,12 @@ B. Navegación Autónoma con Nav2:
 
     def _check_for_updates_background(self):
         """Comprueba silenciosamente en segundo plano si hay actualizaciones al iniciar el launcher."""
-        print("\n[DEBUG Launcher] _check_for_updates_background: Iniciando comprobación silenciosa en background...")
+        logger.debug("_check_for_updates_background: Iniciando comprobación silenciosa en background...")
         def _worker():
             has_update, info, msg = check_for_updates(timeout=2.0)
-            print(f"[DEBUG Launcher] _check_for_updates_background completado: has_update={has_update}, msg='{msg}'")
+            logger.debug("_check_for_updates_background completado: has_update=%s, msg='%s'", has_update, msg)
             if has_update and info:
-                print(f"[DEBUG Launcher] Actualización encontrada: v{info.get('version')}. Abriendo modal...")
+                logger.info("Actualización encontrada: v%s. Abriendo modal...", info.get('version'))
                 self.root.after(0, lambda: self._prompt_update_available(info))
                 self.root.after(0, lambda: self.lbl_update_status.configure(
                     text=f"Nueva versión v{info.get('version')} disponible",
@@ -1038,29 +1047,29 @@ B. Navegación Autónoma con Nav2:
     def _prompt_update_available(self, update_info: dict):
         """Abre la ventana modal para ofrecer al alumno la actualización."""
         target_dir = Path(__file__).parent.resolve()
-        print(f"[DEBUG Launcher] _prompt_update_available: Mostrando ventana modal con target_dir={target_dir}")
+        logger.info("_prompt_update_available: Mostrando ventana modal con target_dir=%s", target_dir)
         UpdateModalDialog(self.root, update_info, target_dir)
 
     def _on_manual_check_updates(self):
         """Comprobación manual invocada por el usuario desde la pestaña de Ajustes."""
-        print("\n[DEBUG Launcher] _on_manual_check_updates: Usuario pulsó 'Comprobar actualizaciones ahora'")
+        logger.info("Usuario pulsó 'Comprobar actualizaciones ahora'")
         self.btn_check_updates.configure(state="disabled")
         self.lbl_update_status.configure(text="Buscando nueva versión en GitHub...", fg=self.text_muted)
 
         def _worker():
             has_update, info, msg = check_for_updates(timeout=3.0)
-            print(f"[DEBUG Launcher] _on_manual_check_updates completado: has_update={has_update}, msg='{msg}'")
+            logger.debug("_on_manual_check_updates completado: has_update=%s, msg='%s'", has_update, msg)
             self.root.after(0, lambda: self.btn_check_updates.configure(state="normal"))
 
             if has_update and info:
-                print(f"[DEBUG Launcher] Mostrando aviso de actualización disponible: v{info.get('version')}")
+                logger.info("Mostrando aviso de actualización disponible: v%s", info.get('version'))
                 self.root.after(0, lambda: self.lbl_update_status.configure(
                     text=f"Nueva versión v{info.get('version')} disponible",
                     fg="#15803d"
                 ))
                 self.root.after(0, lambda: self._prompt_update_available(info))
             elif "pendiente" in msg.lower():
-                print(f"[DEBUG Launcher] Repositorio no configurado aún ({msg})")
+                logger.warning("Repositorio no configurado aún (%s)", msg)
                 self.root.after(0, lambda: self.lbl_update_status.configure(text=msg, fg="#b45309"))
                 self.root.after(0, lambda: messagebox.showinfo(
                     "Actualizaciones",
@@ -1068,7 +1077,7 @@ B. Navegación Autónoma con Nav2:
                     parent=self.root
                 ))
             elif info:
-                print(f"[DEBUG Launcher] El launcher está al día.")
+                logger.info("El launcher está al día (v%s).", CURRENT_VERSION)
                 self.root.after(0, lambda: self.lbl_update_status.configure(
                     text=f"Al día (v{CURRENT_VERSION})",
                     fg="#15803d"
@@ -1079,7 +1088,7 @@ B. Navegación Autónoma con Nav2:
                     parent=self.root
                 ))
             else:
-                print(f"[DEBUG Launcher] Error o timeout comprobando versión: {msg}")
+                logger.warning("Error o timeout comprobando versión: %s", msg)
                 self.root.after(0, lambda: self.lbl_update_status.configure(text=msg, fg="#b91c1c"))
                 self.root.after(0, lambda: messagebox.showwarning("Actualizaciones", msg, parent=self.root))
 

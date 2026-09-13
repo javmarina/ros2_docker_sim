@@ -9,10 +9,13 @@ import re
 import sys
 import shutil
 import socket
+import logging
 import platform
 import subprocess
 from pathlib import Path
 from typing import Tuple, Callable, Optional, List
+
+logger = logging.getLogger("docker_service")
 
 DEFAULT_CONTAINER_NAME = "ros2_jazzy_nav_sim"
 COURSE_IMAGE_NAME = "ros2-jazzy-nav-course:latest"
@@ -113,6 +116,7 @@ class DockerService:
     @staticmethod
     def stop_container(container_name: str = DEFAULT_CONTAINER_NAME) -> Tuple[bool, str]:
         """Detiene y elimina de forma inmediata el contenedor para evitar bloqueos."""
+        logger.info("Deteniendo contenedor '%s'...", container_name)
         try:
             res = subprocess.run(
                 ["docker", "rm", "-f", container_name],
@@ -122,14 +126,18 @@ class DockerService:
                 check=False
             )
             if res.returncode == 0:
+                logger.debug("Contenedor '%s' detenido y eliminado.", container_name)
                 return True, f"Contenedor '{container_name}' detenido correctamente."
+            logger.debug("No había contenedor '%s' activo.", container_name)
             return True, "No había contenedor activo para detener."
         except Exception as e:
+            logger.error("Error al detener contenedor '%s': %s", container_name, e, exc_info=True)
             return False, str(e)
 
     @staticmethod
     def clean_build_volumes() -> Tuple[bool, str]:
         """Elimina los volúmenes persistentes de caché de compilación de colcon."""
+        logger.info("Eliminando volúmenes de caché ros2_jazzy_*...")
         try:
             volumes = ["ros2_jazzy_build_cache", "ros2_jazzy_install_cache", "ros2_jazzy_log_cache"]
             for v in volumes:
@@ -139,8 +147,10 @@ class DockerService:
                     stderr=subprocess.PIPE,
                     check=False
                 )
+            logger.debug("Volúmenes de caché eliminados.")
             return True, "Caché de compilación eliminada correctamente."
         except Exception as e:
+            logger.error("Error al limpiar volúmenes: %s", e, exc_info=True)
             return False, str(e)
 
     @classmethod
@@ -149,7 +159,9 @@ class DockerService:
         Abre una terminal interactiva nativa conectada al contenedor con el entorno ROS 2 ya cargado.
         En Windows prioriza Windows Terminal (wt.exe), con fallback a PowerShell y CMD.
         """
+        logger.info("Solicitud para abrir terminal interactiva en contenedor '%s'", container_name)
         if not cls.is_container_running(container_name):
+            logger.warning("open_container_terminal: Contenedor '%s' no está corriendo", container_name)
             return False, f"El contenedor '{container_name}' no está en ejecución. Inicia la simulación primero."
 
         host_os = cls.get_host_os()
