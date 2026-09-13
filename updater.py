@@ -28,7 +28,7 @@ CURRENT_VERSION = "1.0.0"
 
 # Repositorio de GitHub por defecto (el profesor puede cambiarlo por el suyo)
 # Ejemplo: "tu_usuario/tu_repositorio"
-DEFAULT_GITHUB_REPO = "usuario/repo"
+DEFAULT_GITHUB_REPO = "javmarina/ros2_docker_sim"
 
 # URL directa al version.json en la rama principal (raw.githubusercontent.com)
 DEFAULT_VERSION_URL = f"https://raw.githubusercontent.com/{DEFAULT_GITHUB_REPO}/main/version.json"
