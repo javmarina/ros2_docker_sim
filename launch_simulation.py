@@ -149,8 +149,9 @@ class ModernSimulationLauncher:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title(f"ROS 2 Jazzy - Launcher de Simulación (v{CURRENT_VERSION}) | Robótica Móvil")
-        self.root.geometry("1020x860")
-        self.root.minsize(920, 720)
+        # Dimensiones optimizadas para portátiles de 14" (1080p con 150% de escalado)
+        self.root.geometry("1000x620")
+        self.root.minsize(850, 480)
 
         # Gestor de configuración persistente (guarda en AppData)
         self.config_store = ConfigStore(fallback_dir=Path(__file__).parent.resolve())
@@ -163,7 +164,7 @@ class ModernSimulationLauncher:
         # Estructura de pestañas personalizadas modernas
         self.tabs_dict: Dict[str, tk.Frame] = {}
         self.tab_buttons: Dict[str, tk.Button] = {}
-        self.current_tab_name = "logs"
+        self.current_tab_name = "config"
 
         self._init_styles()
         self._build_layout()
@@ -196,30 +197,24 @@ class ModernSimulationLauncher:
         self.root.configure(bg=self.bg_color)
 
     def _build_layout(self):
-        """Construye la distribución por tarjetas limpias y jerarquizadas."""
+        """Construye la distribución por pestañas limpias sin sobrecarga vertical."""
         # 1. Cabecera principal con estado en vivo
         self._build_header()
 
-        # Contenedor principal con espaciado generoso
+        # Contenedor principal con espaciado equilibrado
         main_container = tk.Frame(self.root, bg=self.bg_color)
-        main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 12))
+        main_container.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 10))
 
-        # 2. Tarjeta 1: Espacio de Trabajo (Workspace de Windows)
-        self._build_workspace_card(main_container)
-
-        # 3. Tarjeta 2: Configuración del Robot y Escenario de Simulación
-        self._build_robot_scenario_card(main_container)
-
-        # 4. Tarjeta 3: Barra de Acciones Rápidas (Lanzar, Terminal, Web, Detener)
+        # 2. Barra de Acciones Rápidas fija arriba (siempre accesible desde cualquier pestaña)
         self._build_action_bar_card(main_container)
 
-        # 5. Panel de Pestañas Moderno Inferior (Logs, Comandos Rápidos, Ajustes, Guía)
+        # 3. Panel de Pestañas Principal (Configuración, Logs, Comandos Rápidos, Ajustes, Guía)
         self._build_modern_tabs(main_container)
 
     def _build_header(self):
-        """Barra superior con logo, título e indicador dinámico de Docker."""
-        header_frame = tk.Frame(self.root, bg="#ffffff", padx=20, pady=12, highlightbackground=self.border_color, highlightthickness=1)
-        header_frame.pack(fill=tk.X, pady=(0, 10))
+        """Barra superior compacta con logo, título e indicador dinámico de Docker."""
+        header_frame = tk.Frame(self.root, bg="#ffffff", padx=16, pady=8, highlightbackground=self.border_color, highlightthickness=1)
+        header_frame.pack(fill=tk.X, pady=(0, 8))
 
         left_box = tk.Frame(header_frame, bg="#ffffff")
         left_box.pack(side=tk.LEFT)
@@ -227,7 +222,7 @@ class ModernSimulationLauncher:
         title_lbl = tk.Label(
             left_box,
             text=f"🤖 ROS 2 Jazzy - Launcher de Simulación  (v{CURRENT_VERSION})",
-            font=("Segoe UI", 12, "bold"),
+            font=("Segoe UI", 11, "bold"),
             bg="#ffffff",
             fg="#1e3a8a"
         )
@@ -236,7 +231,7 @@ class ModernSimulationLauncher:
         sub_lbl = tk.Label(
             left_box,
             text="Robótica Móvil · Gazebo Sim & Navigation2 (Nav2)",
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 8),
             bg="#ffffff",
             fg=self.text_muted
         )
@@ -251,9 +246,9 @@ class ModernSimulationLauncher:
             text="● Comprobando Docker...",
             bg="#fef3c7",
             fg="#b45309",
-            font=("Segoe UI", 9, "bold"),
-            padx=12,
-            pady=5,
+            font=("Segoe UI", 8, "bold"),
+            padx=10,
+            pady=3,
             relief="flat"
         )
         self.lbl_docker_badge.pack(side=tk.LEFT, padx=(0, 6))
@@ -267,9 +262,10 @@ class ModernSimulationLauncher:
             command=self._check_docker_live_status,
             font=("Segoe UI", 8),
             padx=8,
-            pady=4
+            pady=3
         )
         btn_refresh_docker.pack(side=tk.LEFT)
+
 
     def _build_workspace_card(self, parent):
         """Tarjeta para la selección y validación del workspace en Windows montado en Docker."""
@@ -399,9 +395,9 @@ class ModernSimulationLauncher:
         self.lbl_scenario_desc.pack(fill=tk.X)
 
     def _build_action_bar_card(self, parent):
-        """Barra de acciones con botones planos modernos, colores vivos y sin estilo Windows 98."""
-        card = tk.Frame(parent, bg=self.card_bg, padx=16, pady=12, highlightbackground=self.border_color, highlightthickness=1)
-        card.pack(fill=tk.X, pady=(0, 10))
+        """Barra de acciones con botones planos modernos, compacta y siempre accesible."""
+        card = tk.Frame(parent, bg=self.card_bg, padx=12, pady=8, highlightbackground=self.border_color, highlightthickness=1)
+        card.pack(fill=tk.X, pady=(0, 8))
 
         btn_row = tk.Frame(card, bg=self.card_bg)
         btn_row.pack(fill=tk.X)
@@ -414,11 +410,11 @@ class ModernSimulationLauncher:
             hover_bg="#1d4ed8",
             fg="white",
             command=self._on_launch_simulation,
-            font=("Segoe UI", 10, "bold"),
-            padx=18,
-            pady=9
+            font=("Segoe UI", 9, "bold"),
+            padx=16,
+            pady=7
         )
-        self.btn_launch.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        self.btn_launch.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
 
         # 2. Botón Terminal Docker (Gris pizarra / Terminal)
         self.btn_terminal = create_flat_button(
@@ -429,10 +425,10 @@ class ModernSimulationLauncher:
             fg="white",
             command=self._on_open_terminal,
             font=("Segoe UI", 9, "bold"),
-            padx=14,
-            pady=9
+            padx=12,
+            pady=7
         )
-        self.btn_terminal.pack(side=tk.LEFT, padx=(0, 10))
+        self.btn_terminal.pack(side=tk.LEFT, padx=(0, 8))
 
         # 3. Botón Interfaz Web noVNC (Cian/Azul cielo)
         self.btn_open_web = create_flat_button(
@@ -443,10 +439,10 @@ class ModernSimulationLauncher:
             fg="white",
             command=self._open_web_gui,
             font=("Segoe UI", 9, "bold"),
-            padx=14,
-            pady=9
+            padx=12,
+            pady=7
         )
-        self.btn_open_web.pack(side=tk.LEFT, padx=(0, 10))
+        self.btn_open_web.pack(side=tk.LEFT, padx=(0, 8))
 
         # 4. Botón Detener Contenedor (Rojo suave)
         self.btn_stop = create_flat_button(
@@ -457,14 +453,14 @@ class ModernSimulationLauncher:
             fg="white",
             command=self._on_stop_simulation,
             font=("Segoe UI", 9, "bold"),
-            padx=14,
-            pady=9
+            padx=12,
+            pady=7
         )
         self.btn_stop.pack(side=tk.RIGHT)
 
         # Barra de progreso para descargas/construcción de imagen
         self.progress_frame = tk.Frame(card, bg=self.card_bg)
-        self.progress_frame.pack(fill=tk.X, pady=(10, 0))
+        self.progress_frame.pack(fill=tk.X, pady=(6, 0))
         self.progress_bar = ttk.Progressbar(self.progress_frame, orient="horizontal", mode="determinate")
         self.progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
         self.lbl_progress = tk.Label(self.progress_frame, text="Listo", font=("Segoe UI", 8), bg=self.card_bg, fg=self.text_muted)
@@ -476,12 +472,13 @@ class ModernSimulationLauncher:
         tabs_container.pack(fill=tk.BOTH, expand=True)
 
         # Barra superior de botones de pestaña (Segmented bar)
-        nav_bar = tk.Frame(tabs_container, bg="#f1f5f9", padx=6, pady=6)
+        nav_bar = tk.Frame(tabs_container, bg="#f1f5f9", padx=6, pady=4)
         nav_bar.pack(fill=tk.X)
 
         tabs_meta = [
-            ("logs", "📋  Salida y Logs de Simulación"),
-            ("quick", "⚡  Comandos Rápidos ROS 2"),
+            ("config", "🚀  Configuración de Simulación"),
+            ("logs", "📋  Salida y Logs"),
+            ("quick", "⚡  Comandos Rápidos"),
             ("advanced", "⚙️  Ajustes Avanzados"),
             ("guide", "📖  Guía del Estudiante")
         ]
@@ -493,26 +490,34 @@ class ModernSimulationLauncher:
                 font=("Segoe UI", 9, "bold"),
                 relief="flat",
                 bd=0,
-                padx=14,
-                pady=6,
+                padx=12,
+                pady=5,
                 cursor="hand2",
                 command=lambda tid=tab_id: self._select_tab(tid)
             )
-            btn.pack(side=tk.LEFT, padx=3)
+            btn.pack(side=tk.LEFT, padx=2)
             self.tab_buttons[tab_id] = btn
 
             # Crear contenedor para cada pestaña
-            content_frame = tk.Frame(tabs_container, bg=self.card_bg, padx=12, pady=12)
+            content_frame = tk.Frame(tabs_container, bg=self.card_bg, padx=12, pady=10)
             self.tabs_dict[tab_id] = content_frame
 
         # Contenido de cada pestaña
+        self._build_config_tab_content(self.tabs_dict["config"])
         self._build_logs_tab_content(self.tabs_dict["logs"])
         self._build_quick_tab_content(self.tabs_dict["quick"])
         self._build_advanced_tab_content(self.tabs_dict["advanced"])
         self._build_guide_tab_content(self.tabs_dict["guide"])
 
-        # Seleccionar la primera pestaña
-        self._select_tab("logs")
+        # Seleccionar la primera pestaña (Configuración)
+        self._select_tab("config")
+
+    def _build_config_tab_content(self, container):
+        """Pestaña de Configuración principal: Workspace y Selección de Robot/Mundo/Escenario."""
+        # 1. Tarjeta de Espacio de Trabajo
+        self._build_workspace_card(container)
+        # 2. Tarjeta de Robot y Parámetros
+        self._build_robot_scenario_card(container)
 
     def _select_tab(self, tab_id: str):
         """Cambia de pestaña visualmente con botones segmentados modernos."""
@@ -524,6 +529,7 @@ class ModernSimulationLauncher:
             else:
                 frame.pack_forget()
                 self.tab_buttons[tid].configure(bg="#f1f5f9", fg="#475569", activebackground="#e2e8f0", activeforeground="#0f172a")
+
 
     def _build_logs_tab_content(self, container):
         """Consola de logs con fondo oscuro moderno y auto-scroll inteligente."""
