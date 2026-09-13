@@ -1,6 +1,6 @@
 """
 Launcher de Simulación ROS 2 Jazzy para la Asignatura de Robótica Móvil
-Interfaz gráfica moderna, nativa y modular (Windows / macOS / Linux) con Tkinter y Docker.
+Interfaz gráfica moderna, nativa de alta resolución (High-DPI) y modular con Tkinter y Docker.
 """
 
 import os
@@ -12,7 +12,19 @@ import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
+
+# --- Habilitar High-DPI en Windows (elimina texto borroso y renderiza a resolución nativa) ---
+if platform.system().lower() == "windows":
+    import ctypes
+    try:
+        # Per-Monitor DPI aware (Windows 10/11)
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
 
 # Módulos del proyecto
 from config_store import ConfigStore
@@ -99,14 +111,46 @@ CMD ["/bin/bash"]
 """
 
 
+def create_flat_button(
+    parent,
+    text: str,
+    bg: str,
+    hover_bg: str,
+    fg: str = "white",
+    command=None,
+    font=("Segoe UI", 9, "bold"),
+    padx=12,
+    pady=6
+) -> tk.Button:
+    """Crea un botón plano moderno con hover effect y cursor hand2, sin bordes 3D retro."""
+    btn = tk.Button(
+        parent,
+        text=text,
+        bg=bg,
+        fg=fg,
+        activebackground=hover_bg,
+        activeforeground=fg,
+        font=font,
+        relief="flat",
+        bd=0,
+        padx=padx,
+        pady=pady,
+        cursor="hand2",
+        command=command
+    )
+    btn.bind("<Enter>", lambda e: btn.configure(bg=hover_bg) if str(btn["state"]) != "disabled" else None)
+    btn.bind("<Leave>", lambda e: btn.configure(bg=bg) if str(btn["state"]) != "disabled" else None)
+    return btn
+
+
 class ModernSimulationLauncher:
-    """Aplicación principal con interfaz gráfica moderna para ROS 2 Jazzy Simulation Launcher."""
+    """Aplicación principal con interfaz moderna, nítida y desacoplada."""
 
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title(f"ROS 2 Jazzy - Launcher de Simulación (v{CURRENT_VERSION}) | Robótica Móvil")
-        self.root.geometry("980x850")
-        self.root.minsize(900, 720)
+        self.root.geometry("1020x860")
+        self.root.minsize(920, 720)
 
         # Gestor de configuración persistente (guarda en AppData)
         self.config_store = ConfigStore(fallback_dir=Path(__file__).parent.resolve())
@@ -116,6 +160,11 @@ class ModernSimulationLauncher:
         self._autoscroll_enabled = True
         self._current_ansi_tags = []
 
+        # Estructura de pestañas personalizadas modernas
+        self.tabs_dict: Dict[str, tk.Frame] = {}
+        self.tab_buttons: Dict[str, tk.Button] = {}
+        self.current_tab_name = "logs"
+
         self._init_styles()
         self._build_layout()
         self._load_saved_preferences()
@@ -123,18 +172,21 @@ class ModernSimulationLauncher:
         self.root.after(1500, self._check_for_updates_background)
 
     def _init_styles(self):
-        """Configura el tema y la paleta de colores moderna."""
+        """Configura el tema nativo de Windows (vista) y paleta de colores limpia."""
         style = ttk.Style()
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
+        # Usar el tema nativo de Windows para inputs limpios y modernos (evita el aspecto retro de 'clam')
+        if "vista" in style.theme_names():
+            style.theme_use("vista")
+        elif "winnative" in style.theme_names():
+            style.theme_use("winnative")
+        else:
+            style.theme_use("default")
 
-        # Paleta moderna Slate & Indigo
+        # Paleta moderna Slate
         self.bg_color = "#f8fafc"        # Slate 50
-        self.card_bg = "#ffffff"         # Blanco puro para tarjetas
+        self.card_bg = "#ffffff"         # Blanco puro
         self.border_color = "#e2e8f0"    # Slate 200
-        self.primary_color = "#2563eb"   # Azul moderno (Indigo 600)
+        self.primary_color = "#2563eb"   # Azul moderno (Indigo)
         self.primary_hover = "#1d4ed8"
         self.success_color = "#16a34a"   # Verde
         self.danger_color = "#dc2626"    # Rojo
@@ -143,36 +195,14 @@ class ModernSimulationLauncher:
 
         self.root.configure(bg=self.bg_color)
 
-        style.configure("TFrame", background=self.bg_color)
-        style.configure("Card.TFrame", background=self.card_bg, relief="solid", borderwidth=1)
-        style.configure("CardInner.TFrame", background=self.card_bg)
-
-        style.configure("TLabel", background=self.bg_color, foreground=self.text_main, font=("Segoe UI", 9))
-        style.configure("Card.TLabel", background=self.card_bg, foreground=self.text_main, font=("Segoe UI", 9))
-        style.configure("CardMuted.TLabel", background=self.card_bg, foreground=self.text_muted, font=("Segoe UI", 8))
-        style.configure("CardTitle.TLabel", background=self.card_bg, foreground="#1e293b", font=("Segoe UI", 10, "bold"))
-        
-        style.configure("HeaderTitle.TLabel", background=self.bg_color, foreground="#1e3a8a", font=("Segoe UI", 13, "bold"))
-        style.configure("HeaderSubtitle.TLabel", background=self.bg_color, foreground=self.text_muted, font=("Segoe UI", 9))
-
-        # Estilos de botones
-        style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"), padding=(14, 8))
-        style.configure("Terminal.TButton", font=("Segoe UI", 9, "bold"), padding=(10, 6))
-        style.configure("Danger.TButton", font=("Segoe UI", 9, "bold"), padding=(10, 6))
-        style.configure("Secondary.TButton", font=("Segoe UI", 9), padding=(8, 4))
-
-        # Pestañas
-        style.configure("TNotebook", background=self.bg_color, borderwidth=0)
-        style.configure("TNotebook.Tab", font=("Segoe UI", 9, "bold"), padding=(14, 6))
-
     def _build_layout(self):
         """Construye la distribución por tarjetas limpias y jerarquizadas."""
         # 1. Cabecera principal con estado en vivo
         self._build_header()
 
-        # Contenedor central scrolleable para mantener la interfaz adaptativa
-        main_container = ttk.Frame(self.root)
-        main_container.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 10))
+        # Contenedor principal con espaciado generoso
+        main_container = tk.Frame(self.root, bg=self.bg_color)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 12))
 
         # 2. Tarjeta 1: Espacio de Trabajo (Workspace de Windows)
         self._build_workspace_card(main_container)
@@ -183,26 +213,38 @@ class ModernSimulationLauncher:
         # 4. Tarjeta 3: Barra de Acciones Rápidas (Lanzar, Terminal, Web, Detener)
         self._build_action_bar_card(main_container)
 
-        # 5. Panel de Pestañas Inferior (Logs, Comandos Rápidos, Ajustes, Guía)
-        self._build_notebook_tabs(main_container)
+        # 5. Panel de Pestañas Moderno Inferior (Logs, Comandos Rápidos, Ajustes, Guía)
+        self._build_modern_tabs(main_container)
 
     def _build_header(self):
-        """Barra superior con título, asignatura e indicador dinámico de Docker."""
-        header_frame = ttk.Frame(self.root, padding="16 12 16 6")
-        header_frame.pack(fill=tk.X)
+        """Barra superior con logo, título e indicador dinámico de Docker."""
+        header_frame = tk.Frame(self.root, bg="#ffffff", padx=20, pady=12, highlightbackground=self.border_color, highlightthickness=1)
+        header_frame.pack(fill=tk.X, pady=(0, 10))
 
-        left_box = ttk.Frame(header_frame)
+        left_box = tk.Frame(header_frame, bg="#ffffff")
         left_box.pack(side=tk.LEFT)
 
-        title_lbl = ttk.Label(left_box, text=f"🤖 ROS 2 Jazzy - Launcher de Simulación (v{CURRENT_VERSION})", style="HeaderTitle.TLabel")
+        title_lbl = tk.Label(
+            left_box,
+            text=f"🤖 ROS 2 Jazzy - Launcher de Simulación  (v{CURRENT_VERSION})",
+            font=("Segoe UI", 12, "bold"),
+            bg="#ffffff",
+            fg="#1e3a8a"
+        )
         title_lbl.pack(anchor="w")
 
-        sub_lbl = ttk.Label(left_box, text="Robótica Móvil · Gazebo Sim & Navigation2 (Nav2)", style="HeaderSubtitle.TLabel")
+        sub_lbl = tk.Label(
+            left_box,
+            text="Robótica Móvil · Gazebo Sim & Navigation2 (Nav2)",
+            font=("Segoe UI", 9),
+            bg="#ffffff",
+            fg=self.text_muted
+        )
         sub_lbl.pack(anchor="w")
 
         # Indicador de estado a la derecha
-        right_box = ttk.Frame(header_frame)
-        right_box.pack(side=tk.RIGHT, pady=2)
+        right_box = tk.Frame(header_frame, bg="#ffffff")
+        right_box.pack(side=tk.RIGHT)
 
         self.lbl_docker_badge = tk.Label(
             right_box,
@@ -210,330 +252,450 @@ class ModernSimulationLauncher:
             bg="#fef3c7",
             fg="#b45309",
             font=("Segoe UI", 9, "bold"),
-            padx=10,
-            pady=4,
-            relief="solid",
-            bd=1
+            padx=12,
+            pady=5,
+            relief="flat"
         )
         self.lbl_docker_badge.pack(side=tk.LEFT, padx=(0, 6))
 
-        btn_refresh_docker = ttk.Button(right_box, text="🔄", width=3, style="Secondary.TButton", command=self._check_docker_live_status)
+        btn_refresh_docker = create_flat_button(
+            right_box,
+            text="🔄 Actualizar",
+            bg="#f1f5f9",
+            hover_bg="#e2e8f0",
+            fg="#334155",
+            command=self._check_docker_live_status,
+            font=("Segoe UI", 8),
+            padx=8,
+            pady=4
+        )
         btn_refresh_docker.pack(side=tk.LEFT)
 
     def _build_workspace_card(self, parent):
         """Tarjeta para la selección y validación del workspace en Windows montado en Docker."""
-        card = ttk.Frame(parent, style="Card.TFrame", padding=12)
-        card.pack(fill=tk.X, pady=(4, 8))
+        card = tk.Frame(parent, bg=self.card_bg, padx=16, pady=12, highlightbackground=self.border_color, highlightthickness=1)
+        card.pack(fill=tk.X, pady=(0, 10))
 
-        top_row = ttk.Frame(card, style="CardInner.TFrame")
+        top_row = tk.Frame(card, bg=self.card_bg)
         top_row.pack(fill=tk.X)
 
-        title = ttk.Label(top_row, text="📁 Espacio de Trabajo en Windows (Workspace)", style="CardTitle.TLabel")
+        title = tk.Label(
+            top_row,
+            text="📁 Espacio de Trabajo en Windows (Workspace)",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.card_bg,
+            fg="#1e293b"
+        )
         title.pack(side=tk.LEFT)
 
-        saved_tag = ttk.Label(
+        saved_tag = tk.Label(
             top_row,
             text="✓ Guardado en AppData (Persistente)",
-            style="CardMuted.TLabel",
-            foreground="#15803d"
+            font=("Segoe UI", 8),
+            bg=self.card_bg,
+            fg="#15803d"
         )
         saved_tag.pack(side=tk.RIGHT)
 
-        input_row = ttk.Frame(card, style="CardInner.TFrame")
-        input_row.pack(fill=tk.X, pady=(6, 2))
+        input_row = tk.Frame(card, bg=self.card_bg)
+        input_row.pack(fill=tk.X, pady=(8, 4))
 
         self.ent_ws_path = ttk.Entry(input_row, font=("Segoe UI", 9))
-        self.ent_ws_path.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+        self.ent_ws_path.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
         self.ent_ws_path.bind("<KeyRelease>", lambda e: self._on_workspace_path_edited())
 
-        btn_browse = ttk.Button(input_row, text="📂 Explorar...", style="Secondary.TButton", command=self._on_browse_workspace)
+        btn_browse = create_flat_button(
+            input_row,
+            text="📂 Explorar...",
+            bg="#f1f5f9",
+            hover_bg="#e2e8f0",
+            fg="#1e293b",
+            command=self._on_browse_workspace,
+            font=("Segoe UI", 9),
+            padx=12,
+            pady=5
+        )
         btn_browse.pack(side=tk.RIGHT)
 
         # Fila con estado de la carpeta y ayuda para el estudiante
-        feedback_row = ttk.Frame(card, style="CardInner.TFrame")
-        feedback_row.pack(fill=tk.X, pady=(3, 0))
+        feedback_row = tk.Frame(card, bg=self.card_bg)
+        feedback_row.pack(fill=tk.X, pady=(4, 0))
 
-        self.lbl_ws_status = ttk.Label(
+        self.lbl_ws_status = tk.Label(
             feedback_row,
             text="Validando ruta...",
-            style="Card.TLabel",
-            foreground=self.text_muted,
-            font=("Segoe UI", 8)
+            font=("Segoe UI", 8),
+            bg=self.card_bg,
+            fg=self.text_muted
         )
         self.lbl_ws_status.pack(side=tk.LEFT)
 
-        note_lbl = ttk.Label(
+        note_lbl = tk.Label(
             feedback_row,
             text="Se monta como volumen en /ros2_ws/src en el contenedor.",
-            style="CardMuted.TLabel"
+            font=("Segoe UI", 8, "italic"),
+            bg=self.card_bg,
+            fg=self.text_muted
         )
         note_lbl.pack(side=tk.RIGHT)
 
     def _build_robot_scenario_card(self, parent):
         """Tarjeta con la configuración del robot, escenario y parámetros de simulación."""
-        card = ttk.Frame(parent, style="Card.TFrame", padding=12)
-        card.pack(fill=tk.X, pady=(0, 8))
+        card = tk.Frame(parent, bg=self.card_bg, padx=16, pady=12, highlightbackground=self.border_color, highlightthickness=1)
+        card.pack(fill=tk.X, pady=(0, 10))
 
-        title = ttk.Label(card, text="⚙️ Parámetros de Simulación y Navegación", style="CardTitle.TLabel")
-        title.pack(anchor="w", pady=(0, 8))
+        title = tk.Label(
+            card,
+            text="⚙️ Parámetros de Simulación y Navegación",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.card_bg,
+            fg="#1e293b"
+        )
+        title.pack(anchor="w", pady=(0, 10))
 
-        grid_f = ttk.Frame(card, style="CardInner.TFrame")
+        grid_f = tk.Frame(card, bg=self.card_bg)
         grid_f.pack(fill=tk.X)
 
         # Fila 0: Robot y Mundo
-        ttk.Label(grid_f, text="Modelo de Robot:", style="Card.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=4)
+        tk.Label(grid_f, text="Modelo de Robot:", font=("Segoe UI", 9), bg=self.card_bg, fg="#334155").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=4)
         
         all_robots = get_all_robots()
         robot_names = [r.name for r in all_robots]
-        self.cbo_robot = ttk.Combobox(grid_f, values=robot_names, state="readonly", width=30)
+        self.cbo_robot = ttk.Combobox(grid_f, values=robot_names, state="readonly", width=32, font=("Segoe UI", 9))
         self.cbo_robot.grid(row=0, column=1, sticky="ew", padx=(0, 16), pady=4)
         self.cbo_robot.bind("<<ComboboxSelected>>", self._on_robot_changed)
 
-        ttk.Label(grid_f, text="Mundo Gazebo:", style="Card.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 6), pady=4)
-        self.cbo_world = ttk.Combobox(grid_f, state="readonly", width=20)
+        tk.Label(grid_f, text="Mundo Gazebo:", font=("Segoe UI", 9), bg=self.card_bg, fg="#334155").grid(row=0, column=2, sticky="w", padx=(0, 6), pady=4)
+        self.cbo_world = ttk.Combobox(grid_f, state="readonly", width=20, font=("Segoe UI", 9))
         self.cbo_world.grid(row=0, column=3, sticky="ew", pady=4)
         self.cbo_world.bind("<<ComboboxSelected>>", lambda e: self._save_current_settings())
 
         # Fila 1: Escenario y ROS Domain ID
-        ttk.Label(grid_f, text="Escenario:", style="Card.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 6), pady=4)
-        self.cbo_scenario = ttk.Combobox(grid_f, state="readonly", width=30)
-        self.cbo_scenario.grid(row=1, column=1, sticky="ew", padx=(0, 16), pady=4)
+        tk.Label(grid_f, text="Escenario:", font=("Segoe UI", 9), bg=self.card_bg, fg="#334155").grid(row=1, column=0, sticky="w", padx=(0, 6), pady=6)
+        self.cbo_scenario = ttk.Combobox(grid_f, state="readonly", width=32, font=("Segoe UI", 9))
+        self.cbo_scenario.grid(row=1, column=1, sticky="ew", padx=(0, 16), pady=6)
         self.cbo_scenario.bind("<<ComboboxSelected>>", self._on_scenario_changed)
 
-        ttk.Label(grid_f, text="ROS_DOMAIN_ID:", style="Card.TLabel").grid(row=1, column=2, sticky="w", padx=(0, 6), pady=4)
-        self.ent_domain_id = ttk.Entry(grid_f, width=10)
-        self.ent_domain_id.grid(row=1, column=3, sticky="w", pady=4)
+        tk.Label(grid_f, text="ROS_DOMAIN_ID:", font=("Segoe UI", 9), bg=self.card_bg, fg="#334155").grid(row=1, column=2, sticky="w", padx=(0, 6), pady=6)
+        self.ent_domain_id = ttk.Entry(grid_f, width=10, font=("Segoe UI", 9))
+        self.ent_domain_id.grid(row=1, column=3, sticky="w", pady=6)
         self.ent_domain_id.bind("<KeyRelease>", lambda e: self._save_current_settings())
 
         grid_f.columnconfigure(1, weight=1)
         grid_f.columnconfigure(3, weight=1)
 
         # Fila informativa dinámica de lo que hace el escenario seleccionado
-        info_frame = ttk.Frame(card, style="CardInner.TFrame")
-        info_frame.pack(fill=tk.X, pady=(8, 0))
+        info_frame = tk.Frame(card, bg="#f8fafc", padx=10, pady=6, highlightbackground="#e2e8f0", highlightthickness=1)
+        info_frame.pack(fill=tk.X, pady=(10, 0))
 
         self.lbl_scenario_desc = tk.Label(
             info_frame,
             text="",
-            bg="#f1f5f9",
-            fg="#334155",
+            bg="#f8fafc",
+            fg="#475569",
             font=("Segoe UI", 8, "italic"),
-            anchor="w",
-            padx=8,
-            pady=4,
-            relief="flat"
+            anchor="w"
         )
         self.lbl_scenario_desc.pack(fill=tk.X)
 
     def _build_action_bar_card(self, parent):
-        """Barra de acciones principales: Lanzar simulación, Abrir Terminal, Web GUI, Detener."""
-        card = ttk.Frame(parent, style="Card.TFrame", padding=10)
-        card.pack(fill=tk.X, pady=(0, 8))
+        """Barra de acciones con botones planos modernos, colores vivos y sin estilo Windows 98."""
+        card = tk.Frame(parent, bg=self.card_bg, padx=16, pady=12, highlightbackground=self.border_color, highlightthickness=1)
+        card.pack(fill=tk.X, pady=(0, 10))
 
-        btn_row = ttk.Frame(card, style="CardInner.TFrame")
+        btn_row = tk.Frame(card, bg=self.card_bg)
         btn_row.pack(fill=tk.X)
 
-        # Botón Principal: Iniciar Simulación
-        self.btn_launch = ttk.Button(
+        # 1. Botón Principal: Iniciar Simulación (Azul Indigo moderno)
+        self.btn_launch = create_flat_button(
             btn_row,
-            text="🚀 Iniciar Simulación",
-            style="Primary.TButton",
-            command=self._on_launch_simulation
+            text="🚀  Iniciar Simulación",
+            bg="#2563eb",
+            hover_bg="#1d4ed8",
+            fg="white",
+            command=self._on_launch_simulation,
+            font=("Segoe UI", 10, "bold"),
+            padx=18,
+            pady=9
         )
-        self.btn_launch.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+        self.btn_launch.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
 
-        # Botón Terminal Docker (Funcionalidad 1 solicitada)
-        self.btn_terminal = ttk.Button(
+        # 2. Botón Terminal Docker (Gris pizarra / Terminal)
+        self.btn_terminal = create_flat_button(
             btn_row,
-            text="💻 Abrir Terminal Docker",
-            style="Terminal.TButton",
-            command=self._on_open_terminal
+            text="💻  Abrir Terminal Docker",
+            bg="#0f172a",
+            hover_bg="#1e293b",
+            fg="white",
+            command=self._on_open_terminal,
+            font=("Segoe UI", 9, "bold"),
+            padx=14,
+            pady=9
         )
-        self.btn_terminal.pack(side=tk.LEFT, padx=(0, 8))
+        self.btn_terminal.pack(side=tk.LEFT, padx=(0, 10))
 
-        # Botón Navegador Web (noVNC)
-        self.btn_open_web = ttk.Button(
+        # 3. Botón Interfaz Web noVNC (Cian/Azul cielo)
+        self.btn_open_web = create_flat_button(
             btn_row,
-            text="🌐 Interfaz Web (noVNC)",
-            style="Secondary.TButton",
-            command=self._open_web_gui
+            text="🌐  Interfaz Web (noVNC)",
+            bg="#0284c7",
+            hover_bg="#0369a1",
+            fg="white",
+            command=self._open_web_gui,
+            font=("Segoe UI", 9, "bold"),
+            padx=14,
+            pady=9
         )
-        self.btn_open_web.pack(side=tk.LEFT, padx=(0, 8))
+        self.btn_open_web.pack(side=tk.LEFT, padx=(0, 10))
 
-        # Botón Detener Simulación
-        self.btn_stop = ttk.Button(
+        # 4. Botón Detener Contenedor (Rojo suave)
+        self.btn_stop = create_flat_button(
             btn_row,
-            text="🛑 Detener Contenedor",
-            style="Danger.TButton",
-            command=self._on_stop_simulation
+            text="🛑  Detener Contenedor",
+            bg="#dc2626",
+            hover_bg="#b91c1c",
+            fg="white",
+            command=self._on_stop_simulation,
+            font=("Segoe UI", 9, "bold"),
+            padx=14,
+            pady=9
         )
         self.btn_stop.pack(side=tk.RIGHT)
 
         # Barra de progreso para descargas/construcción de imagen
-        self.progress_frame = ttk.Frame(card, style="CardInner.TFrame")
-        self.progress_frame.pack(fill=tk.X, pady=(8, 0))
+        self.progress_frame = tk.Frame(card, bg=self.card_bg)
+        self.progress_frame.pack(fill=tk.X, pady=(10, 0))
         self.progress_bar = ttk.Progressbar(self.progress_frame, orient="horizontal", mode="determinate")
         self.progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
-        self.lbl_progress = ttk.Label(self.progress_frame, text="Listo", style="CardMuted.TLabel")
+        self.lbl_progress = tk.Label(self.progress_frame, text="Listo", font=("Segoe UI", 8), bg=self.card_bg, fg=self.text_muted)
         self.lbl_progress.pack(side=tk.RIGHT)
 
-    def _build_notebook_tabs(self, parent):
-        """Pestañas inferiores: Logs, Comandos Rápidos, Ajustes Avanzados y Guía."""
-        self.notebook = ttk.Notebook(parent)
-        self.notebook.pack(fill=tk.BOTH, expand=True)
+    def _build_modern_tabs(self, parent):
+        """Barra de navegación moderna por pestañas con diseño plano (sin pestañas retro de Tkinter)."""
+        tabs_container = tk.Frame(parent, bg=self.card_bg, highlightbackground=self.border_color, highlightthickness=1)
+        tabs_container.pack(fill=tk.BOTH, expand=True)
 
-        # Pestaña 1: Logs de Simulación
-        self.tab_logs = ttk.Frame(self.notebook, padding=8)
-        self.notebook.add(self.tab_logs, text="📋 Salida y Logs de Simulación")
+        # Barra superior de botones de pestaña (Segmented bar)
+        nav_bar = tk.Frame(tabs_container, bg="#f1f5f9", padx=6, pady=6)
+        nav_bar.pack(fill=tk.X)
 
-        # Pestaña 2: Comandos Rápidos ROS 2 (Integrados)
-        self.tab_quick = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(self.tab_quick, text="⚡ Comandos Rápidos ROS 2")
+        tabs_meta = [
+            ("logs", "📋  Salida y Logs de Simulación"),
+            ("quick", "⚡  Comandos Rápidos ROS 2"),
+            ("advanced", "⚙️  Ajustes Avanzados"),
+            ("guide", "📖  Guía del Estudiante")
+        ]
 
-        # Pestaña 3: Ajustes Avanzados
-        self.tab_advanced = ttk.Frame(self.notebook, padding=12)
-        self.notebook.add(self.tab_advanced, text="⚙️ Ajustes Avanzados")
+        for tab_id, label_text in tabs_meta:
+            btn = tk.Button(
+                nav_bar,
+                text=label_text,
+                font=("Segoe UI", 9, "bold"),
+                relief="flat",
+                bd=0,
+                padx=14,
+                pady=6,
+                cursor="hand2",
+                command=lambda tid=tab_id: self._select_tab(tid)
+            )
+            btn.pack(side=tk.LEFT, padx=3)
+            self.tab_buttons[tab_id] = btn
 
-        # Pestaña 4: Guía del Estudiante
-        self.tab_guide = ttk.Frame(self.notebook, padding=8)
-        self.notebook.add(self.tab_guide, text="📖 Guía del Estudiante")
+            # Crear contenedor para cada pestaña
+            content_frame = tk.Frame(tabs_container, bg=self.card_bg, padx=12, pady=12)
+            self.tabs_dict[tab_id] = content_frame
 
-        self._build_logs_tab_content()
-        self._build_quick_tab_content()
-        self._build_advanced_tab_content()
-        self._build_guide_tab_content()
+        # Contenido de cada pestaña
+        self._build_logs_tab_content(self.tabs_dict["logs"])
+        self._build_quick_tab_content(self.tabs_dict["quick"])
+        self._build_advanced_tab_content(self.tabs_dict["advanced"])
+        self._build_guide_tab_content(self.tabs_dict["guide"])
 
-    def _build_logs_tab_content(self):
-        """Contenido de la consola de logs con soporte ANSI y auto-scroll inteligente."""
-        ctrl_bar = ttk.Frame(self.tab_logs)
+        # Seleccionar la primera pestaña
+        self._select_tab("logs")
+
+    def _select_tab(self, tab_id: str):
+        """Cambia de pestaña visualmente con botones segmentados modernos."""
+        self.current_tab_name = tab_id
+        for tid, frame in self.tabs_dict.items():
+            if tid == tab_id:
+                frame.pack(fill=tk.BOTH, expand=True)
+                self.tab_buttons[tid].configure(bg="#2563eb", fg="white", activebackground="#1d4ed8", activeforeground="white")
+            else:
+                frame.pack_forget()
+                self.tab_buttons[tid].configure(bg="#f1f5f9", fg="#475569", activebackground="#e2e8f0", activeforeground="#0f172a")
+
+    def _build_logs_tab_content(self, container):
+        """Consola de logs con fondo oscuro moderno y auto-scroll inteligente."""
+        ctrl_bar = tk.Frame(container, bg=self.card_bg)
         ctrl_bar.pack(fill=tk.X, pady=(0, 6))
 
-        self.lbl_autoscroll_status = ttk.Label(
+        self.lbl_autoscroll_status = tk.Label(
             ctrl_bar,
             text="● Auto-scroll: Activo",
             font=("Segoe UI", 8, "bold"),
-            foreground="#16a34a"
+            bg=self.card_bg,
+            fg="#16a34a"
         )
         self.lbl_autoscroll_status.pack(side=tk.LEFT)
 
-        btn_clear = ttk.Button(ctrl_bar, text="🧹 Limpiar logs", style="Secondary.TButton", command=self._clear_logs)
+        btn_clear = create_flat_button(
+            ctrl_bar,
+            text="🧹 Limpiar logs",
+            bg="#f1f5f9",
+            hover_bg="#e2e8f0",
+            fg="#334155",
+            command=self._clear_logs,
+            font=("Segoe UI", 8),
+            padx=10,
+            pady=3
+        )
         btn_clear.pack(side=tk.RIGHT, padx=4)
 
-        btn_scroll_bottom = ttk.Button(ctrl_bar, text="⬇ Ir al final", style="Secondary.TButton", command=self._scroll_to_bottom)
+        btn_scroll_bottom = create_flat_button(
+            ctrl_bar,
+            text="⬇ Ir al final",
+            bg="#f1f5f9",
+            hover_bg="#e2e8f0",
+            fg="#334155",
+            command=self._scroll_to_bottom,
+            font=("Segoe UI", 8),
+            padx=10,
+            pady=3
+        )
         btn_scroll_bottom.pack(side=tk.RIGHT, padx=4)
 
         self.txt_logs = scrolledtext.ScrolledText(
-            self.tab_logs,
+            container,
             wrap=tk.WORD,
             bg="#18181b",        # Zinc 900
             fg="#e4e4e7",        # Zinc 200
             insertbackground="white",
-            font=("Consolas", 9),
-            padx=8,
-            pady=8
+            font=("Consolas", 10),
+            padx=10,
+            pady=10,
+            relief="flat",
+            bd=0
         )
         self.txt_logs.pack(fill=tk.BOTH, expand=True)
 
         self._setup_autoscroll_detection()
         self._init_ansi_tags()
 
-    def _build_quick_tab_content(self):
+    def _build_quick_tab_content(self, container):
         """Pestaña con atajos rápidos de comandos ROS 2 para estudiantes."""
-        container = ttk.Frame(self.tab_quick)
-        container.pack(fill=tk.BOTH, expand=True)
-
-        intro_lbl = ttk.Label(
+        intro_lbl = tk.Label(
             container,
-            text="Ejecuta comandos de inspección y control directamente en el contenedor en ejecución:",
-            font=("Segoe UI", 9, "bold")
+            text="Ejecuta comandos de inspección y control directamente en el contenedor:",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.card_bg,
+            fg="#1e293b"
         )
-        intro_lbl.pack(anchor="w", pady=(0, 8))
+        intro_lbl.pack(anchor="w", pady=(0, 10))
 
-        # Cuadrícula de botones rápidos
-        grid_cmds = ttk.Frame(container)
-        grid_cmds.pack(fill=tk.X, pady=(0, 12))
+        # Cuadrícula de botones rápidos planos
+        grid_cmds = tk.Frame(container, bg=self.card_bg)
+        grid_cmds.pack(fill=tk.X, pady=(0, 14))
 
-        btn_topics = ttk.Button(
+        btn_topics = create_flat_button(
             grid_cmds,
             text="📡 Listar Tópicos (ros2 topic list)",
-            style="Secondary.TButton",
-            command=lambda: self._execute_quick_command("ros2 topic list")
+            bg="#f1f5f9",
+            hover_bg="#e2e8f0",
+            fg="#1e293b",
+            command=lambda: self._execute_quick_command("ros2 topic list"),
+            padx=12,
+            pady=8
         )
-        btn_topics.grid(row=0, column=0, sticky="ew", padx=4, pady=4)
+        btn_topics.grid(row=0, column=0, sticky="ew", padx=6, pady=4)
 
-        btn_nodes = ttk.Button(
+        btn_nodes = create_flat_button(
             grid_cmds,
             text="🧩 Listar Nodos (ros2 node list)",
-            style="Secondary.TButton",
-            command=lambda: self._execute_quick_command("ros2 node list")
+            bg="#f1f5f9",
+            hover_bg="#e2e8f0",
+            fg="#1e293b",
+            command=lambda: self._execute_quick_command("ros2 node list"),
+            padx=12,
+            pady=8
         )
-        btn_nodes.grid(row=0, column=1, sticky="ew", padx=4, pady=4)
+        btn_nodes.grid(row=0, column=1, sticky="ew", padx=6, pady=4)
 
-        btn_topics_info = ttk.Button(
+        btn_topics_info = create_flat_button(
             grid_cmds,
             text="🔍 Tópicos con tipo (ros2 topic list -t)",
-            style="Secondary.TButton",
-            command=lambda: self._execute_quick_command("ros2 topic list -t")
+            bg="#f1f5f9",
+            hover_bg="#e2e8f0",
+            fg="#1e293b",
+            command=lambda: self._execute_quick_command("ros2 topic list -t"),
+            padx=12,
+            pady=8
         )
-        btn_topics_info.grid(row=1, column=0, sticky="ew", padx=4, pady=4)
+        btn_topics_info.grid(row=1, column=0, sticky="ew", padx=6, pady=4)
 
-        btn_compile = ttk.Button(
+        btn_compile = create_flat_button(
             grid_cmds,
             text="🔨 Compilar Workspace (colcon build)",
-            style="Secondary.TButton",
-            command=self._on_compile_workspace
+            bg="#f1f5f9",
+            hover_bg="#e2e8f0",
+            fg="#1e293b",
+            command=self._on_compile_workspace,
+            padx=12,
+            pady=8
         )
-        btn_compile.grid(row=1, column=1, sticky="ew", padx=4, pady=4)
+        btn_compile.grid(row=1, column=1, sticky="ew", padx=6, pady=4)
 
         grid_cmds.columnconfigure(0, weight=1)
         grid_cmds.columnconfigure(1, weight=1)
 
         # Entrada de comando personalizado
-        custom_frame = ttk.LabelFrame(container, text=" Comando ROS 2 Personalizado ", padding=10)
+        custom_frame = tk.LabelFrame(container, text=" Comando ROS 2 Personalizado ", bg=self.card_bg, font=("Segoe UI", 9, "bold"), fg="#334155", padx=12, pady=10)
         custom_frame.pack(fill=tk.X, pady=(6, 0))
 
-        entry_row = ttk.Frame(custom_frame)
+        entry_row = tk.Frame(custom_frame, bg=self.card_bg)
         entry_row.pack(fill=tk.X)
 
-        self.ent_custom_cmd = ttk.Entry(entry_row, font=("Consolas", 9))
+        self.ent_custom_cmd = ttk.Entry(entry_row, font=("Consolas", 10))
         self.ent_custom_cmd.insert(0, "ros2 topic list")
-        self.ent_custom_cmd.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+        self.ent_custom_cmd.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
         self.ent_custom_cmd.bind("<Return>", lambda e: self._on_run_custom_command())
 
-        btn_run_custom = ttk.Button(
+        btn_run_custom = create_flat_button(
             entry_row,
             text="▶ Ejecutar",
-            style="Primary.TButton",
-            command=self._on_run_custom_command
+            bg="#2563eb",
+            hover_bg="#1d4ed8",
+            fg="white",
+            command=self._on_run_custom_command,
+            padx=14,
+            pady=5
         )
         btn_run_custom.pack(side=tk.RIGHT)
 
-        ttk.Label(
+        tk.Label(
             custom_frame,
             text="La salida del comando se imprimirá en directo en la pestaña 'Salida y Logs de Simulación'.",
             font=("Segoe UI", 8, "italic"),
-            foreground=self.text_muted
-        ).pack(anchor="w", pady=(4, 0))
+            bg=self.card_bg,
+            fg=self.text_muted
+        ).pack(anchor="w", pady=(6, 0))
 
-    def _build_advanced_tab_content(self):
-        """Pestaña de ajustes avanzados (puerto web, argumentos extra, reconstrucción de imagen)."""
-        container = ttk.Frame(self.tab_advanced)
-        container.pack(fill=tk.BOTH, expand=True)
-
+    def _build_advanced_tab_content(self, container):
+        """Pestaña de ajustes avanzados (puerto web, argumentos extra, actualizaciones de GitHub)."""
         # Fila Puerto Web noVNC
-        row_port = ttk.Frame(container)
-        row_port.pack(fill=tk.X, pady=4)
-        ttk.Label(row_port, text="Puerto Servidor Web noVNC:", width=28).pack(side=tk.LEFT)
-        self.ent_web_port = ttk.Entry(row_port, width=10)
+        row_port = tk.Frame(container, bg=self.card_bg)
+        row_port.pack(fill=tk.X, pady=6)
+        tk.Label(row_port, text="Puerto Servidor Web noVNC:", font=("Segoe UI", 9), bg=self.card_bg, width=28, anchor="w").pack(side=tk.LEFT)
+        self.ent_web_port = ttk.Entry(row_port, width=10, font=("Segoe UI", 9))
         self.ent_web_port.pack(side=tk.LEFT, padx=(0, 8))
         self.ent_web_port.bind("<KeyRelease>", lambda e: self._save_current_settings())
-        ttk.Label(row_port, text="(Por defecto: 6080 -> http://localhost:6080/vnc.html)", font=("Segoe UI", 8, "italic"), foreground=self.text_muted).pack(side=tk.LEFT)
+        tk.Label(row_port, text="(Por defecto: 6080 -> http://localhost:6080/vnc.html)", font=("Segoe UI", 8, "italic"), bg=self.card_bg, fg=self.text_muted).pack(side=tk.LEFT)
 
         # Fila Argumentos Extra ROS 2
-        row_args = ttk.Frame(container)
-        row_args.pack(fill=tk.X, pady=4)
-        ttk.Label(row_args, text="Argumentos extra para ROS 2:", width=28).pack(side=tk.LEFT)
-        self.ent_extra_args = ttk.Entry(row_args)
+        row_args = tk.Frame(container, bg=self.card_bg)
+        row_args.pack(fill=tk.X, pady=6)
+        tk.Label(row_args, text="Argumentos extra para ROS 2:", font=("Segoe UI", 9), bg=self.card_bg, width=28, anchor="w").pack(side=tk.LEFT)
+        self.ent_extra_args = ttk.Entry(row_args, font=("Segoe UI", 9))
         self.ent_extra_args.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.ent_extra_args.bind("<KeyRelease>", lambda e: self._save_current_settings())
 
@@ -545,79 +707,97 @@ class ModernSimulationLauncher:
             variable=self.var_force_rebuild,
             command=self._save_current_settings
         )
-        cb_rebuild.pack(anchor="w", pady=(8, 12))
+        cb_rebuild.pack(anchor="w", pady=(10, 12))
 
         # Botones de mantenimiento de Docker
-        maint_box = ttk.LabelFrame(container, text=" Mantenimiento de Docker y Caché ", padding=10)
+        maint_box = tk.LabelFrame(container, text=" Mantenimiento de Docker y Caché ", bg=self.card_bg, font=("Segoe UI", 9, "bold"), fg="#334155", padx=12, pady=10)
         maint_box.pack(fill=tk.X, pady=(6, 0))
 
-        maint_btns = ttk.Frame(maint_box)
+        maint_btns = tk.Frame(maint_box, bg=self.card_bg)
         maint_btns.pack(fill=tk.X)
 
-        self.btn_prep_image = ttk.Button(
+        self.btn_prep_image = create_flat_button(
             maint_btns,
             text="📦 Reconstruir / Preparar Imagen Docker",
-            style="Secondary.TButton",
-            command=self._on_pull_or_build_image
+            bg="#f1f5f9",
+            hover_bg="#e2e8f0",
+            fg="#1e293b",
+            command=self._on_pull_or_build_image,
+            padx=12,
+            pady=6
         )
         self.btn_prep_image.pack(side=tk.LEFT, padx=(0, 10))
 
-        btn_clean_cache = ttk.Button(
+        btn_clean_cache = create_flat_button(
             maint_btns,
             text="🧹 Limpiar Volúmenes de Caché",
-            style="Secondary.TButton",
-            command=self._on_clean_build_cache
+            bg="#f1f5f9",
+            hover_bg="#e2e8f0",
+            fg="#1e293b",
+            command=self._on_clean_build_cache,
+            padx=12,
+            pady=6
         )
         btn_clean_cache.pack(side=tk.LEFT)
 
         # Actualizaciones automáticas desde GitHub
-        update_box = ttk.LabelFrame(container, text=" Actualizaciones del Software (GitHub) ", padding=10)
-        update_box.pack(fill=tk.X, pady=(10, 0))
+        update_box = tk.LabelFrame(container, text=" Actualizaciones del Software (GitHub) ", bg=self.card_bg, font=("Segoe UI", 9, "bold"), fg="#334155", padx=12, pady=10)
+        update_box.pack(fill=tk.X, pady=(12, 0))
 
-        update_row = ttk.Frame(update_box)
+        update_row = tk.Frame(update_box, bg=self.card_bg)
         update_row.pack(fill=tk.X)
 
-        ttk.Label(
+        tk.Label(
             update_row,
             text=f"Versión instalada: v{CURRENT_VERSION}",
-            font=("Segoe UI", 9, "bold")
+            font=("Segoe UI", 9, "bold"),
+            bg=self.card_bg,
+            fg="#1e293b"
         ).pack(side=tk.LEFT, padx=(0, 15))
 
-        self.btn_check_updates = ttk.Button(
+        self.btn_check_updates = create_flat_button(
             update_row,
             text="🔄 Comprobar actualizaciones",
-            style="Secondary.TButton",
-            command=self._on_manual_check_updates
+            bg="#2563eb",
+            hover_bg="#1d4ed8",
+            fg="white",
+            command=self._on_manual_check_updates,
+            padx=12,
+            pady=5
         )
         self.btn_check_updates.pack(side=tk.LEFT, padx=(0, 10))
 
-        self.lbl_update_status = ttk.Label(
+        self.lbl_update_status = tk.Label(
             update_row,
             text="Comprobando al iniciar...",
             font=("Segoe UI", 8, "italic"),
-            foreground=self.text_muted
+            bg=self.card_bg,
+            fg=self.text_muted
         )
         self.lbl_update_status.pack(side=tk.LEFT)
 
         # Etiqueta indicadora de la ruta de guardado en AppData
-        appdata_lbl = ttk.Label(
+        appdata_lbl = tk.Label(
             container,
             text=f"Archivo de configuración: {self.config_store.config_path}",
             font=("Segoe UI", 8),
-            foreground=self.text_muted
+            bg=self.card_bg,
+            fg=self.text_muted
         )
         appdata_lbl.pack(anchor="w", pady=(18, 0))
 
-    def _build_guide_tab_content(self):
-        """Pestaña con la guía de usuario y prácticas para los estudiantes."""
+    def _build_guide_tab_content(self, container):
+        """Guía del estudiante en texto limpio y legible."""
         guide_text = scrolledtext.ScrolledText(
-            self.tab_guide,
+            container,
             wrap=tk.WORD,
             bg="#ffffff",
             fg="#1e293b",
             font=("Segoe UI", 9),
             padx=12,
-            pady=12
+            pady=12,
+            relief="flat",
+            bd=0
         )
         guide_text.pack(fill=tk.BOTH, expand=True)
 
@@ -772,11 +952,11 @@ B. Navegación Autónoma con Nav2:
         is_valid, msg = ConfigStore.validate_workspace(path_str)
         if is_valid:
             if "detectado" in msg:
-                self.lbl_ws_status.configure(text=f"✓ {msg}", foreground="#15803d")
+                self.lbl_ws_status.configure(text=f"✓ {msg}", fg="#15803d")
             else:
-                self.lbl_ws_status.configure(text=f"✓ {msg}", foreground="#1e293b")
+                self.lbl_ws_status.configure(text=f"✓ {msg}", fg="#1e293b")
         else:
-            self.lbl_ws_status.configure(text=f"⚠ {msg}", foreground="#dc2626")
+            self.lbl_ws_status.configure(text=f"⚠ {msg}", fg="#dc2626")
 
     def _on_robot_changed(self, event=None):
         selected_name = self.cbo_robot.get()
@@ -837,12 +1017,12 @@ B. Navegación Autónoma con Nav2:
                 self.root.after(0, lambda: self._prompt_update_available(info))
                 self.root.after(0, lambda: self.lbl_update_status.configure(
                     text=f"Nueva versión v{info.get('version')} disponible",
-                    foreground="#15803d"
+                    fg="#15803d"
                 ))
             else:
                 self.root.after(0, lambda: self.lbl_update_status.configure(
                     text=f"Launcher actualizado (v{CURRENT_VERSION})",
-                    foreground=self.text_muted
+                    fg=self.text_muted
                 ))
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -854,7 +1034,7 @@ B. Navegación Autónoma con Nav2:
     def _on_manual_check_updates(self):
         """Comprobación manual invocada por el usuario desde la pestaña de Ajustes."""
         self.btn_check_updates.configure(state="disabled")
-        self.lbl_update_status.configure(text="Buscando nueva versión en GitHub...", foreground=self.text_muted)
+        self.lbl_update_status.configure(text="Buscando nueva versión en GitHub...", fg=self.text_muted)
 
         def _worker():
             has_update, info, msg = check_for_updates(timeout=3.0)
@@ -863,11 +1043,11 @@ B. Navegación Autónoma con Nav2:
             if has_update and info:
                 self.root.after(0, lambda: self.lbl_update_status.configure(
                     text=f"Nueva versión v{info.get('version')} disponible",
-                    foreground="#15803d"
+                    fg="#15803d"
                 ))
                 self.root.after(0, lambda: self._prompt_update_available(info))
             elif "pendiente" in msg.lower():
-                self.root.after(0, lambda: self.lbl_update_status.configure(text=msg, foreground="#b45309"))
+                self.root.after(0, lambda: self.lbl_update_status.configure(text=msg, fg="#b45309"))
                 self.root.after(0, lambda: messagebox.showinfo(
                     "Actualizaciones",
                     f"{msg}\n\nPara activar las actualizaciones automáticas, edita la variable 'DEFAULT_GITHUB_REPO' en updater.py con tu repositorio de GitHub (ej: 'tu_usuario/tu_repositorio').",
@@ -876,7 +1056,7 @@ B. Navegación Autónoma con Nav2:
             elif info:
                 self.root.after(0, lambda: self.lbl_update_status.configure(
                     text=f"Al día (v{CURRENT_VERSION})",
-                    foreground="#15803d"
+                    fg="#15803d"
                 ))
                 self.root.after(0, lambda: messagebox.showinfo(
                     "Actualizaciones",
@@ -884,7 +1064,7 @@ B. Navegación Autónoma con Nav2:
                     parent=self.root
                 ))
             else:
-                self.root.after(0, lambda: self.lbl_update_status.configure(text=msg, foreground="#b91c1c"))
+                self.root.after(0, lambda: self.lbl_update_status.configure(text=msg, fg="#b91c1c"))
                 self.root.after(0, lambda: messagebox.showwarning("Actualizaciones", msg, parent=self.root))
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -894,9 +1074,7 @@ B. Navegación Autónoma con Nav2:
     def _on_open_terminal(self):
         """Funcionalidad 1: Abre una terminal interactiva nativa del contenedor Docker."""
         def _worker():
-            # Comprobar si el contenedor está en ejecución
             if not DockerService.is_container_running(DEFAULT_CONTAINER_NAME):
-                # Si no está corriendo, preguntar si desea iniciarlo en modo interactivo
                 answer = messagebox.askyesno(
                     "Contenedor no iniciado",
                     "El contenedor de simulación no está activo.\n\n"
@@ -924,14 +1102,13 @@ B. Navegación Autónoma con Nav2:
             messagebox.showerror("Docker", "Docker Desktop no está en ejecución.", parent=self.root)
             return
 
-        self.notebook.select(self.tab_logs)
+        self._select_tab("logs")
         self._log("\nIniciando contenedor en modo terminal...\n")
 
         ws_path = self.ent_ws_path.get().strip()
         domain_id = self.ent_domain_id.get().strip() or "42"
         web_port = self.ent_web_port.get().strip() or str(DEFAULT_NOVNC_PORT)
 
-        # Detener contenedor previo si existiera
         DockerService.stop_container(DEFAULT_CONTAINER_NAME)
 
         docker_cmd = [
@@ -954,7 +1131,6 @@ B. Navegación Autónoma con Nav2:
         try:
             subprocess.run(docker_cmd, check=True)
             self._log("Contenedor iniciado con éxito en segundo plano.\n")
-            # Abrir la terminal
             DockerService.open_container_terminal(DEFAULT_CONTAINER_NAME)
         except Exception as e:
             self._log(f"Error al iniciar contenedor: {e}\n")
@@ -975,7 +1151,7 @@ B. Navegación Autónoma con Nav2:
             return
 
         self._save_current_settings()
-        self.notebook.select(self.tab_logs)
+        self._select_tab("logs")
         self._log("\n" + "="*50 + "\nIniciando simulación de ROS 2...\n" + "="*50 + "\n")
 
         def _worker():
@@ -984,10 +1160,8 @@ B. Navegación Autónoma con Nav2:
                 self._on_pull_or_build_image()
                 return
 
-            # Detener contenedor previo
             DockerService.stop_container(DEFAULT_CONTAINER_NAME)
 
-            # Obtener perfil del robot y generar comando
             selected_robot_name = self.cbo_robot.get()
             robot_profile = get_robot_by_name(selected_robot_name) or get_all_robots()[0]
             
@@ -1020,8 +1194,6 @@ B. Navegación Autónoma con Nav2:
             )
 
             self._log(f"Comando Docker generado:\n{' '.join(docker_cmd)}\n\n")
-
-            # Abrir navegador automáticamente tras 2.5 segundos
             self.root.after(2500, self._open_web_gui)
 
             try:
@@ -1049,7 +1221,7 @@ B. Navegación Autónoma con Nav2:
 
     def _on_stop_simulation(self):
         """Detiene y elimina el contenedor activo."""
-        self.notebook.select(self.tab_logs)
+        self._select_tab("logs")
 
         def _worker():
             self._log("\nDeteniendo contenedor de simulación...\n")
@@ -1071,7 +1243,7 @@ B. Navegación Autónoma con Nav2:
             )
             return
 
-        self.notebook.select(self.tab_logs)
+        self._select_tab("logs")
         self._log(f"\n>>> Ejecutando comando en contenedor: {cmd_str}\n")
 
         def _worker():
@@ -1099,7 +1271,7 @@ B. Navegación Autónoma con Nav2:
             return
 
         ws_path = self.ent_ws_path.get().strip()
-        self.notebook.select(self.tab_logs)
+        self._select_tab("logs")
         self._log("\n=== Compilando paquetes del workspace con colcon... ===\n")
 
         def _worker():
@@ -1159,7 +1331,7 @@ B. Navegación Autónoma con Nav2:
     def _on_pull_or_build_image(self):
         """Descarga o construye la imagen de la asignatura a partir del Dockerfile."""
         image_name = COURSE_IMAGE_NAME
-        self.notebook.select(self.tab_logs)
+        self._select_tab("logs")
         self._log(f"\n--- Preparando imagen de la asignatura: {image_name} ---\n")
 
         def _worker():
@@ -1296,9 +1468,9 @@ B. Navegación Autónoma con Nav2:
 
     def _update_autoscroll_ui(self):
         if self._autoscroll_enabled:
-            self.lbl_autoscroll_status.configure(text="● Auto-scroll: Activo", foreground="#16a34a")
+            self.lbl_autoscroll_status.configure(text="● Auto-scroll: Activo", fg="#16a34a")
         else:
-            self.lbl_autoscroll_status.configure(text="○ Auto-scroll: Pausado", foreground="#dc2626")
+            self.lbl_autoscroll_status.configure(text="○ Auto-scroll: Pausado", fg="#dc2626")
 
     def _scroll_to_bottom(self):
         self.txt_logs.see(tk.END)
@@ -1327,7 +1499,7 @@ B. Navegación Autónoma con Nav2:
         for tag_name, hex_color in ansi_color_map.items():
             self.txt_logs.tag_configure(tag_name, foreground=hex_color)
 
-        self.txt_logs.tag_configure("ansi_bold", font=("Consolas", 9, "bold"))
+        self.txt_logs.tag_configure("ansi_bold", font=("Consolas", 10, "bold"))
         self.txt_logs.tag_configure("ansi_underline", underline=True)
 
 
