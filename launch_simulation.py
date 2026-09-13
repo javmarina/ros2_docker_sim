@@ -182,6 +182,7 @@ class ModernSimulationLauncher:
         self.active_simulation_proc: Optional[subprocess.Popen] = None
         self._autoscroll_enabled = True
         self._current_ansi_tags = []
+        self._latest_update_info: Optional[Dict] = None
 
         # Estructura de pestañas personalizadas modernas
         self.tabs_dict: Dict[str, tk.Frame] = {}
@@ -306,6 +307,20 @@ class ModernSimulationLauncher:
         right_box = tk.Frame(header_frame, bg="#ffffff")
         right_box.pack(side=tk.RIGHT)
 
+        # Botón de actualización del launcher en la cabecera (visible y directo)
+        self.btn_header_update = create_flat_button(
+            right_box,
+            text=f"v{CURRENT_VERSION}",
+            bg="#f1f5f9",
+            hover_bg="#e2e8f0",
+            fg="#475569",
+            command=self._on_header_update_click,
+            font=("Segoe UI", 8, "bold"),
+            padx=8,
+            pady=3
+        )
+        self.btn_header_update.pack(side=tk.LEFT, padx=(0, 6))
+
         self.lbl_docker_badge = tk.Label(
             right_box,
             text="● Comprobando Docker...",
@@ -320,7 +335,7 @@ class ModernSimulationLauncher:
 
         btn_refresh_docker = create_flat_button(
             right_box,
-            text="🔄 Actualizar",
+            text="🔄 Docker",
             bg="#f1f5f9",
             hover_bg="#e2e8f0",
             fg="#334155",
@@ -1080,6 +1095,13 @@ B. Navegación Autónoma con Nav2:
 
     # --- Actualizaciones Automáticas (GitHub) ---
 
+    def _on_header_update_click(self):
+        """Gestiona el clic en el botón de versión / actualización de la cabecera."""
+        if self._latest_update_info:
+            self._prompt_update_available(self._latest_update_info)
+        else:
+            self._on_manual_check_updates()
+
     def _check_for_updates_background(self):
         """Comprueba silenciosamente en segundo plano si hay actualizaciones al iniciar el launcher."""
         logger.debug("_check_for_updates_background: Iniciando comprobación silenciosa en background...")
@@ -1087,13 +1109,28 @@ B. Navegación Autónoma con Nav2:
             has_update, info, msg = check_for_updates(timeout=2.0)
             logger.debug("_check_for_updates_background completado: has_update=%s, msg='%s'", has_update, msg)
             if has_update and info:
-                logger.info("Actualización encontrada: v%s. Abriendo modal...", info.get('version'))
+                ver = info.get('version', '')
+                logger.info("Actualización encontrada: v%s. Abriendo modal...", ver)
+                self._latest_update_info = info
+                self.root.after(0, lambda: self.btn_header_update.configure(
+                    text=f"✨ Actualizar a v{ver}",
+                    bg="#16a34a",
+                    activebackground="#15803d",
+                    fg="#ffffff"
+                ))
                 self.root.after(0, lambda: self._prompt_update_available(info))
                 self.root.after(0, lambda: self.lbl_update_status.configure(
-                    text=f"Nueva versión v{info.get('version')} disponible",
+                    text=f"Nueva versión v{ver} disponible",
                     fg="#15803d"
                 ))
             else:
+                self._latest_update_info = None
+                self.root.after(0, lambda: self.btn_header_update.configure(
+                    text=f"v{CURRENT_VERSION} (Al día)",
+                    bg="#f1f5f9",
+                    activebackground="#e2e8f0",
+                    fg="#15803d"
+                ))
                 self.root.after(0, lambda: self.lbl_update_status.configure(
                     text=f"Launcher actualizado (v{CURRENT_VERSION})",
                     fg=self.text_muted
@@ -1107,7 +1144,7 @@ B. Navegación Autónoma con Nav2:
         UpdateModalDialog(self.root, update_info, target_dir)
 
     def _on_manual_check_updates(self):
-        """Comprobación manual invocada por el usuario desde la pestaña de Ajustes."""
+        """Comprobación manual invocada por el usuario desde la pestaña de Ajustes o cabecera."""
         logger.info("Usuario pulsó 'Comprobar actualizaciones ahora'")
         self.btn_check_updates.configure(state="disabled")
         self.lbl_update_status.configure(text="Buscando nueva versión en GitHub...", fg=self.text_muted)
@@ -1118,13 +1155,22 @@ B. Navegación Autónoma con Nav2:
             self.root.after(0, lambda: self.btn_check_updates.configure(state="normal"))
 
             if has_update and info:
-                logger.info("Mostrando aviso de actualización disponible: v%s", info.get('version'))
+                ver = info.get('version', '')
+                logger.info("Mostrando aviso de actualización disponible: v%s", ver)
+                self._latest_update_info = info
+                self.root.after(0, lambda: self.btn_header_update.configure(
+                    text=f"✨ Actualizar a v{ver}",
+                    bg="#16a34a",
+                    activebackground="#15803d",
+                    fg="#ffffff"
+                ))
                 self.root.after(0, lambda: self.lbl_update_status.configure(
-                    text=f"Nueva versión v{info.get('version')} disponible",
+                    text=f"Nueva versión v{ver} disponible",
                     fg="#15803d"
                 ))
                 self.root.after(0, lambda: self._prompt_update_available(info))
             elif "pendiente" in msg.lower():
+                self._latest_update_info = None
                 logger.warning("Repositorio no configurado aún (%s)", msg)
                 self.root.after(0, lambda: self.lbl_update_status.configure(text=msg, fg="#b45309"))
                 self.root.after(0, lambda: messagebox.showinfo(
@@ -1133,7 +1179,14 @@ B. Navegación Autónoma con Nav2:
                     parent=self.root
                 ))
             elif info:
+                self._latest_update_info = None
                 logger.info("El launcher está al día (v%s).", CURRENT_VERSION)
+                self.root.after(0, lambda: self.btn_header_update.configure(
+                    text=f"v{CURRENT_VERSION} (Al día)",
+                    bg="#f1f5f9",
+                    activebackground="#e2e8f0",
+                    fg="#15803d"
+                ))
                 self.root.after(0, lambda: self.lbl_update_status.configure(
                     text=f"Al día (v{CURRENT_VERSION})",
                     fg="#15803d"
@@ -1144,6 +1197,7 @@ B. Navegación Autónoma con Nav2:
                     parent=self.root
                 ))
             else:
+                self._latest_update_info = None
                 logger.warning("Error o timeout comprobando versión: %s", msg)
                 self.root.after(0, lambda: self.lbl_update_status.configure(text=msg, fg="#b91c1c"))
                 self.root.after(0, lambda: messagebox.showwarning("Actualizaciones", msg, parent=self.root))

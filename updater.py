@@ -23,15 +23,34 @@ from typing import Tuple, Optional, Callable, Dict, Any
 # Configurar logger para este módulo
 logger = logging.getLogger("updater")
 
-# Versión actual de este cliente
-CURRENT_VERSION = "1.0.0"
-
 # Repositorio de GitHub por defecto (el profesor puede cambiarlo por el suyo)
 # Ejemplo: "tu_usuario/tu_repositorio"
 DEFAULT_GITHUB_REPO = "javmarina/ros2_docker_sim"
 
 # URL directa al version.json en la rama principal (raw.githubusercontent.com)
 DEFAULT_VERSION_URL = f"https://raw.githubusercontent.com/{DEFAULT_GITHUB_REPO}/main/version.json"
+
+# URL de respaldo automático para descargar el archivo zip de la rama principal de GitHub
+DEFAULT_ARCHIVE_URL = f"https://github.com/{DEFAULT_GITHUB_REPO}/archive/refs/heads/main.zip"
+
+
+def get_local_version() -> str:
+    """Obtiene la versión instalada localmente leyendo version.json o usando '1.0.0' como base."""
+    try:
+        ver_file = Path(__file__).parent.resolve() / "version.json"
+        if ver_file.is_file():
+            with open(ver_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                ver = data.get("version")
+                if ver:
+                    return str(ver).strip()
+    except Exception as e:
+        logger.debug("get_local_version error al leer version.json: %s", e)
+    return "1.0.0"
+
+
+# Versión actual de este cliente (se lee dinámicamente de version.json)
+CURRENT_VERSION = get_local_version()
 
 
 def parse_version(v_str: str) -> Tuple[int, ...]:
@@ -102,13 +121,15 @@ def fetch_remote_version(version_url: str = DEFAULT_VERSION_URL, timeout: float 
 
 def check_for_updates(
     version_url: str = DEFAULT_VERSION_URL,
-    timeout: float = 2.0
+    timeout: float = 2.0,
+    local_ver: Optional[str] = None
 ) -> Tuple[bool, Optional[Dict[str, Any]], str]:
     """
     Función principal de comprobación:
     Retorna (hay_actualizacion_disponible, info_dict, mensaje)
     """
-    logger.info("Iniciando comprobación de actualizaciones (Versión local instalada: v%s)", CURRENT_VERSION)
+    active_local_ver = local_ver or get_local_version()
+    logger.info("Iniciando comprobación de actualizaciones (Versión local instalada: v%s)", active_local_ver)
     ok, data, msg = fetch_remote_version(version_url, timeout=timeout)
     if not ok or not data:
         logger.warning("check_for_updates: No se pudo obtener versión remota (%s)", msg)
@@ -116,12 +137,12 @@ def check_for_updates(
 
     remote_ver = data.get("version", "")
     logger.info("Versión remota encontrada: v%s", remote_ver)
-    if is_newer_version(remote_ver, CURRENT_VERSION):
-        msg = f"Nueva versión {remote_ver} disponible (actual: {CURRENT_VERSION})."
+    if is_newer_version(remote_ver, active_local_ver):
+        msg = f"Nueva versión {remote_ver} disponible (actual: {active_local_ver})."
         logger.info("check_for_updates: ¡HAY ACTUALIZACIÓN DISPONIBLE! -> %s", msg)
         return True, data, msg
     else:
-        msg = f"Ya tienes la última versión ({CURRENT_VERSION})."
+        msg = f"Ya tienes la última versión ({active_local_ver})."
         logger.info("check_for_updates: El sistema está al día -> %s", msg)
         return False, data, msg
 
@@ -129,34 +150,81 @@ def check_for_updates(
 def download_and_extract_update(
     download_url: str,
     target_dir: Path,
-    progress_cb: Callable[[float, str], None]
+    progress_cb: Callable[[float, str], None],
+    fallback_repo: str = DEFAULT_GITHUB_REPO
 ) -> Tuple[bool, str]:
     """
     Descarga el paquete .zip de la nueva versión con reporte de progreso
     y extrae los archivos sobreescribiendo los ficheros locales.
+    Soporta fallback automático a la descarga directa del repositorio de GitHub
+    en caso de que download_url retorne 404 o no esté disponible.
     """
-    logger.info("Iniciando descarga de actualización desde '%s' (Destino: %s)", download_url, target_dir)
+    fallback_url = f"https://github.com/{fallback_repo}/archive/refs/heads/main.zip"
+    logger.info(
+        "Iniciando descarga de actualización. URL principal: '%s' | URL de respaldo: '%s' (Destino: %s)",
+        download_url, fallback_url, target_dir
+    )
 
-    if not download_url:
-        err_msg = "La URL de descarga de la actualización está vacía."
+    candidate_urls = []
+    if download_url and "usuario/repo" not in download_url:
+        candidate_urls.append(download_url)
+    if fallback_url and fallback_url not in candidate_urls and "usuario/repo" not in fallback_url:
+        candidate_urls.append(fallback_url)
+
+    if not candidate_urls:
+        err_msg = "No se configuró ninguna URL de descarga válida."
         logger.error("download_and_extract_update: %s", err_msg)
         return False, err_msg
 
     temp_zip = None
     try:
-        progress_cb(5.0, "Conectando con el servidor de descargas...")
-        req = urllib.request.Request(
-            download_url,
-            headers={"User-Agent": f"ROS2-Nav-Launcher/{CURRENT_VERSION}"}
-        )
+        response = None
+        active_url = None
+        last_error = None
 
-        with urllib.request.urlopen(req, timeout=15.0) as response:
+        for idx, url in enumerate(candidate_urls):
+            try:
+                if idx == 0:
+                    progress_cb(5.0, "Conectando con el servidor de descargas...")
+                else:
+                    progress_cb(10.0, "Conectando con el servidor de respaldo de GitHub...")
+                logger.debug("Intentando conectar con URL de descarga: %s", url)
+                req = urllib.request.Request(
+                    url,
+                    headers={"User-Agent": f"ROS2-Nav-Launcher/{get_local_version()}"}
+                )
+                resp = urllib.request.urlopen(req, timeout=15.0)
+                if resp.status == 200:
+                    response = resp
+                    active_url = url
+                    logger.info("Conexión de descarga exitosa con: %s", url)
+                    break
+                else:
+                    logger.warning("Respuesta HTTP no esperada (%s) desde: %s", resp.status, url)
+            except urllib.error.HTTPError as e:
+                last_error = e
+                logger.warning("Error HTTP %s (%s) al intentar descargar desde '%s'", e.code, e.reason, url)
+                if idx + 1 < len(candidate_urls):
+                    logger.info("Intentando descarga alternativa usando el archivo zip del repositorio de GitHub...")
+                    progress_cb(8.0, "Probando servidor de respaldo de GitHub...")
+            except Exception as e:
+                last_error = e
+                logger.warning("Error de conexión al intentar descargar desde '%s': %s", url, e)
+                if idx + 1 < len(candidate_urls):
+                    logger.info("Intentando descarga alternativa usando el archivo zip del repositorio de GitHub...")
+                    progress_cb(8.0, "Probando servidor de respaldo de GitHub...")
+
+        if not response or not active_url:
+            err_msg = f"No se pudo descargar el archivo de actualización: {last_error}"
+            logger.error("download_and_extract_update: %s", err_msg)
+            return False, err_msg
+
+        with response:
             total_size = int(response.headers.get("Content-Length", 0))
             logger.debug("Tamaño de descarga reportado: %s bytes", total_size)
             downloaded = 0
             block_size = 16384  # 16 KB
 
-            # Guardar en archivo temporal
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
             temp_zip = Path(temp_file.name)
             logger.debug("Guardando temporalmente en '%s'", temp_zip)
@@ -181,21 +249,52 @@ def download_and_extract_update(
         # Descomprimir en el directorio de destino
         extracted_files = []
         with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
-            for member in zip_ref.namelist():
-                filename = os.path.basename(member)
-                if not filename:
+            namelist = zip_ref.namelist()
+            # Detectar si todos los archivos están contenidos en una carpeta raíz común
+            # (típico de los archivos zip de GitHub como 'ros2_docker_sim-main/')
+            non_empty_items = [m.rstrip('/') for m in namelist if m.strip('/')]
+            top_parts = [p.split('/')[0] for p in non_empty_items if '/' in p]
+            has_single_root = bool(top_parts and all(p == top_parts[0] for p in [m.split('/')[0] for m in non_empty_items]))
+            root_prefix = f"{top_parts[0]}/" if has_single_root else ""
+            if has_single_root:
+                logger.debug("Prefijo de directorio raíz detectado en el ZIP: '%s'", root_prefix)
+
+            for member in namelist:
+                # Omitir directorios
+                if member.endswith('/'):
                     continue
-                if filename.endswith(".py") or filename in ("version.json", "Dockerfile"):
-                    source = zip_ref.open(member)
-                    dest_file = target_dir / filename
-                    with open(dest_file, "wb") as target:
+
+                # Quitar el prefijo de carpeta raíz si existe
+                rel_path_str = member[len(root_prefix):] if (has_single_root and member.startswith(root_prefix)) else member
+                if not rel_path_str:
+                    continue
+
+                # Normalizar ruta para evitar path traversal
+                rel_path = Path(rel_path_str)
+                if rel_path.is_absolute() or ".." in rel_path.parts:
+                    logger.warning("Omitiendo ruta insegura en zip: %s", member)
+                    continue
+
+                # Omitir archivos ocultos (.git, .gitignore, .github, etc.) y __pycache__
+                if any(part.startswith('.') for part in rel_path.parts) or "__pycache__" in rel_path.parts:
+                    continue
+
+                filename = rel_path.name
+                allowed_extensions = (
+                    ".py", ".json", ".ico", ".png", ".jpg", ".jpeg", ".svg",
+                    ".md", ".sh", ".bash", ".yaml", ".yml", ".txt"
+                )
+                if filename.endswith(allowed_extensions) or filename in ("Dockerfile", "docker-compose.yml"):
+                    dest_file = target_dir / rel_path
+                    dest_file.parent.mkdir(parents=True, exist_ok=True)
+                    with zip_ref.open(member) as source, open(dest_file, "wb") as target:
                         target.write(source.read())
-                    extracted_files.append(filename)
-                    logger.debug("Archivo extraído y reemplazado: '%s' -> %s", filename, dest_file)
+                    extracted_files.append(str(rel_path))
+                    logger.debug("Archivo extraído y actualizado: '%s' -> %s", member, dest_file)
 
         logger.info("Actualización completada con éxito. Archivos actualizados: %s", extracted_files)
         progress_cb(100.0, "¡Actualización completada!")
-        return True, "Archivos actualizados correctamente."
+        return True, f"Actualizados {len(extracted_files)} archivos correctamente."
 
     except Exception as e:
         err_msg = f"Error durante la actualización: {str(e)}"
@@ -213,12 +312,13 @@ def download_and_extract_update(
 def restart_application():
     """Reinicia la aplicación lanzando un nuevo proceso Python y cerrando el actual."""
     python_bin = sys.executable
-    script_path = sys.argv[0]
+    script_path = str(Path(sys.argv[0]).resolve())
+    app_dir = str(Path(script_path).parent.resolve())
     args = [python_bin, script_path] + sys.argv[1:]
-    logger.info("restart_application: Reiniciando con comando: %s", ' '.join(args))
+    logger.info("restart_application: Reiniciando con comando: %s (cwd: %s)", ' '.join(args), app_dir)
     
     try:
-        subprocess.Popen(args)
+        subprocess.Popen(args, cwd=app_dir)
     except Exception as e:
         logger.error("restart_application error al relanzar proceso: %s", e, exc_info=True)
     sys.exit(0)
@@ -239,53 +339,129 @@ class UpdateModalDialog(tk.Toplevel):
         self.release_date = update_info.get("release_date", "")
 
         self.title("Actualización disponible - ROS 2 Launcher")
-        self.geometry("500x340")
-        self.resizable(False, False)
+        self.geometry("560x440")
+        self.minsize(480, 380)
+        self.resizable(True, True)
         self.configure(bg="#f8fafc")
         self.transient(parent)
         self.grab_set()
 
-        # Centrar en la ventana padre
-        self._center_window(parent)
+        # Configurar icono en la ventana modal si está disponible
+        try:
+            from embedded_icon import get_app_icon_path
+            ico_p = get_app_icon_path()
+            if ico_p and ico_p.is_file():
+                self.iconbitmap(str(ico_p))
+        except Exception:
+            pass
+
         self._build_ui()
+        # Centrar en la ventana padre tras construir la interfaz
+        self._center_window(parent)
 
     def _center_window(self, parent):
         self.update_idletasks()
         try:
-            x = parent.winfo_x() + (parent.winfo_width() // 2) - 250
-            y = parent.winfo_y() + (parent.winfo_height() // 2) - 170
-            self.geometry(f"+{max(0, x)}+{max(0, y)}")
+            w = self.winfo_width()
+            h = self.winfo_height()
+            if w <= 1:
+                w = 560
+            if h <= 1:
+                h = 440
+            pw = parent.winfo_width()
+            ph = parent.winfo_height()
+            px = parent.winfo_rootx()
+            py = parent.winfo_rooty()
+            x = px + max(0, (pw - w) // 2)
+            y = py + max(0, (ph - h) // 2)
+            self.geometry(f"+{x}+{y}")
         except Exception:
             pass
 
     def _build_ui(self):
-        # Cabecera
+        # 1. Cabecera superior
         head_frame = tk.Frame(self, bg="#ffffff", padx=16, pady=12, relief="solid", bd=1)
-        head_frame.pack(fill=tk.X)
+        head_frame.pack(side=tk.TOP, fill=tk.X)
+
+        badge_frame = tk.Frame(head_frame, bg="#ffffff")
+        badge_frame.pack(fill=tk.X)
 
         lbl_badge = tk.Label(
-            head_frame,
-            text=f"Nueva versión: v{self.remote_version}",
+            badge_frame,
+            text=f"✨ Nueva versión: v{self.remote_version}",
             bg="#dcfce7",
             fg="#15803d",
             font=("Segoe UI", 10, "bold"),
-            padx=8,
-            pady=3
+            padx=10,
+            pady=4
         )
         lbl_badge.pack(side=tk.LEFT)
 
         lbl_current = tk.Label(
-            head_frame,
+            badge_frame,
             text=f"(Versión instalada: v{CURRENT_VERSION})",
             bg="#ffffff",
             fg="#64748b",
             font=("Segoe UI", 9)
         )
-        lbl_current.pack(side=tk.LEFT, padx=8)
+        lbl_current.pack(side=tk.LEFT, padx=10)
 
-        # Cuerpo con Changelog
+        if self.release_date:
+            lbl_date = tk.Label(
+                badge_frame,
+                text=f"Fecha: {self.release_date}",
+                bg="#ffffff",
+                fg="#94a3b8",
+                font=("Segoe UI", 8)
+            )
+            lbl_date.pack(side=tk.RIGHT)
+
+        # 2. Barra inferior de botones (CRÍTICO: side=tk.BOTTOM ANTES del cuerpo para que NUNCA se recorte)
+        btn_frame = tk.Frame(self, bg="#f1f5f9", padx=16, pady=12, relief="solid", bd=1)
+        btn_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Botón de actualizar (Primario - Verde moderno con hover)
+        self.btn_update = tk.Button(
+            btn_frame,
+            text="⬇ Actualizar y Reiniciar",
+            bg="#16a34a",
+            activebackground="#15803d",
+            fg="#ffffff",
+            activeforeground="#ffffff",
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            bd=0,
+            padx=16,
+            pady=8,
+            cursor="hand2",
+            command=self._on_start_update
+        )
+        self.btn_update.pack(side=tk.RIGHT, padx=(10, 0))
+        self.btn_update.bind("<Enter>", lambda e: self.btn_update.configure(bg="#15803d") if str(self.btn_update["state"]) != "disabled" else None)
+        self.btn_update.bind("<Leave>", lambda e: self.btn_update.configure(bg="#16a34a") if str(self.btn_update["state"]) != "disabled" else None)
+
+        self.btn_later = tk.Button(
+            btn_frame,
+            text="Recordar más tarde",
+            bg="#e2e8f0",
+            activebackground="#cbd5e1",
+            fg="#334155",
+            activeforeground="#1e293b",
+            font=("Segoe UI", 9),
+            relief="flat",
+            bd=0,
+            padx=14,
+            pady=8,
+            cursor="hand2",
+            command=self.destroy
+        )
+        self.btn_later.pack(side=tk.RIGHT)
+        self.btn_later.bind("<Enter>", lambda e: self.btn_later.configure(bg="#cbd5e1") if str(self.btn_later["state"]) != "disabled" else None)
+        self.btn_later.bind("<Leave>", lambda e: self.btn_later.configure(bg="#e2e8f0") if str(self.btn_later["state"]) != "disabled" else None)
+
+        # 3. Cuerpo central con Changelog y barra de progreso (EXPANDIBLE)
         body_frame = tk.Frame(self, bg="#f8fafc", padx=16, pady=12)
-        body_frame.pack(fill=tk.BOTH, expand=True)
+        body_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
         tk.Label(
             body_frame,
@@ -293,11 +469,17 @@ class UpdateModalDialog(tk.Toplevel):
             bg="#f8fafc",
             fg="#0f172a",
             font=("Segoe UI", 9, "bold")
-        ).pack(anchor="w", pady=(0, 4))
+        ).pack(anchor="w", pady=(0, 6))
 
-        # Caja de texto para el changelog
+        # Contenedor para el changelog con scrollbar
+        txt_box_frame = tk.Frame(body_frame, bg="#f8fafc")
+        txt_box_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        scroll = ttk.Scrollbar(txt_box_frame, orient="vertical")
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
         txt_changelog = tk.Text(
-            body_frame,
+            txt_box_frame,
             height=5,
             bg="#ffffff",
             fg="#334155",
@@ -306,44 +488,26 @@ class UpdateModalDialog(tk.Toplevel):
             bd=1,
             wrap=tk.WORD,
             padx=8,
-            pady=8
+            pady=8,
+            yscrollcommand=scroll.set
         )
+        scroll.configure(command=txt_changelog.yview)
         txt_changelog.insert(tk.END, self.changelog)
         txt_changelog.configure(state="disabled")
-        txt_changelog.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+        txt_changelog.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Barra de progreso (inicialmente oculta o en 0)
+        # Barra de progreso
         self.prog_bar = ttk.Progressbar(body_frame, orient="horizontal", mode="determinate")
-        self.prog_bar.pack(fill=tk.X, pady=(4, 2))
+        self.prog_bar.pack(fill=tk.X, pady=(4, 4))
 
         self.lbl_status = tk.Label(
             body_frame,
             text="¿Deseas descargar e instalar esta actualización ahora?",
             bg="#f8fafc",
             fg="#475569",
-            font=("Segoe UI", 8)
+            font=("Segoe UI", 9)
         )
         self.lbl_status.pack(anchor="w")
-
-        # Barra inferior de botones
-        btn_frame = tk.Frame(self, bg="#f8fafc", padx=16, pady=12)
-        btn_frame.pack(fill=tk.X)
-
-        self.btn_update = ttk.Button(
-            btn_frame,
-            text="⬇ Actualizar y Reiniciar",
-            style="Primary.TButton",
-            command=self._on_start_update
-        )
-        self.btn_update.pack(side=tk.RIGHT, padx=(6, 0))
-
-        self.btn_later = ttk.Button(
-            btn_frame,
-            text="Recordar más tarde",
-            style="Secondary.TButton",
-            command=self.destroy
-        )
-        self.btn_later.pack(side=tk.RIGHT)
 
     def _set_progress(self, pct: float, status_text: str):
         def _update():
@@ -359,8 +523,8 @@ class UpdateModalDialog(tk.Toplevel):
 
     def _on_start_update(self):
         """Inicia la descarga de la actualización en un hilo secundario."""
-        self.btn_update.configure(state="disabled")
-        self.btn_later.configure(state="disabled")
+        self.btn_update.configure(state="disabled", bg="#94a3b8", cursor="watch", text="⏳ Actualizando...")
+        self.btn_later.configure(state="disabled", cursor="arrow")
 
         def _worker():
             ok, msg = download_and_extract_update(
@@ -377,6 +541,12 @@ class UpdateModalDialog(tk.Toplevel):
                     f"No se pudo completar la actualización:\n{msg}",
                     parent=self
                 ))
-                self.after(0, self.destroy)
+                self.after(0, lambda: self.btn_update.configure(
+                    state="normal",
+                    bg="#16a34a",
+                    cursor="hand2",
+                    text="⬇ Reintentar actualización"
+                ))
+                self.after(0, lambda: self.btn_later.configure(state="normal", cursor="hand2"))
 
         threading.Thread(target=_worker, daemon=True).start()
