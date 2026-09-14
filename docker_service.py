@@ -20,6 +20,7 @@ logger = logging.getLogger("docker_service")
 DEFAULT_CONTAINER_NAME = "ros2_jazzy_nav_sim"
 COURSE_IMAGE_NAME = "ros2-jazzy-nav-course:latest"
 DEFAULT_NOVNC_PORT = 6080
+WIN32_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
 class DockerService:
@@ -55,7 +56,8 @@ class DockerService:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                check=False
+                check=False,
+                creationflags=WIN32_NO_WINDOW
             )
             if res.returncode == 0:
                 return True, res.stdout.strip()
@@ -72,7 +74,8 @@ class DockerService:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                check=False
+                check=False,
+                creationflags=WIN32_NO_WINDOW
             )
             if res.returncode == 0:
                 return True, f"Docker activo (v{res.stdout.strip()})"
@@ -198,7 +201,8 @@ class DockerService:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                check=False
+                check=False,
+                creationflags=WIN32_NO_WINDOW
             )
             return bool(res.stdout.strip())
         except Exception:
@@ -213,7 +217,8 @@ class DockerService:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                check=False
+                check=False,
+                creationflags=WIN32_NO_WINDOW
             )
             return res.returncode == 0
         except Exception:
@@ -229,7 +234,8 @@ class DockerService:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                check=False
+                check=False,
+                creationflags=WIN32_NO_WINDOW
             )
             if res.returncode == 0:
                 logger.debug("Contenedor '%s' detenido y eliminado.", container_name)
@@ -251,7 +257,8 @@ class DockerService:
                     ["docker", "volume", "rm", "-f", v],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    check=False
+                    check=False,
+                    creationflags=WIN32_NO_WINDOW
                 )
             logger.debug("Volúmenes de caché eliminados.")
             return True, "Caché de compilación eliminada correctamente."
@@ -370,7 +377,8 @@ class DockerService:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
-                universal_newlines=True
+                universal_newlines=True,
+                creationflags=WIN32_NO_WINDOW
             )
             return proc
         except Exception as e:
@@ -452,7 +460,8 @@ class DockerService:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
-                universal_newlines=True
+                universal_newlines=True,
+                creationflags=WIN32_NO_WINDOW
             )
 
             for line in iter(process.stdout.readline, ''):
@@ -519,7 +528,8 @@ class DockerService:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
-                universal_newlines=True
+                universal_newlines=True,
+                creationflags=WIN32_NO_WINDOW
             )
 
             for line in iter(process.stdout.readline, ''):

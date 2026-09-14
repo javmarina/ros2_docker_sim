@@ -25,10 +25,10 @@ logging.basicConfig(
 logger = logging.getLogger("launcher")
 
 # --- Habilitar AppUserModelID en Windows para icono en barra de tareas ---
-if platform.system().lower() == "windows":
+if sys.platform == "win32":
     try:
         import ctypes
-        app_id = "lasalle.sistemasdenavegacion.ros2launcher.v2"
+        app_id = "lasalle.sistemasdenavegacion.ros2launcher.v107"
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
     except Exception:
         pass
@@ -187,6 +187,7 @@ class ProcessRunnerThread(QtCore.QThread):
 
     def run(self):
         try:
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             self.proc = subprocess.Popen(
                 self.cmd,
                 cwd=self.cwd,
@@ -196,7 +197,8 @@ class ProcessRunnerThread(QtCore.QThread):
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
-                universal_newlines=True
+                universal_newlines=True,
+                creationflags=creationflags
             )
             for line in iter(self.proc.stdout.readline, ''):
                 self.signals.line_received.emit(line)
@@ -1599,7 +1601,8 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         docker_cmd.extend([image_name, "tail", "-f", "/dev/null"])
 
         try:
-            subprocess.run(docker_cmd, check=True)
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            subprocess.run(docker_cmd, check=True, creationflags=creationflags)
             self._append_log("Contenedor iniciado con éxito en segundo plano.\n")
             DockerService.open_container_terminal(DEFAULT_CONTAINER_NAME)
         except Exception as e:
@@ -1912,6 +1915,23 @@ def main():
 
     window = ModernSimulationLauncher()
     window.show()
+
+    # Garantizar que Windows Taskbar y Alt+Tab reciban el icono nativo (32x32)
+    if sys.platform == "win32" and ico_path and ico_path.is_file():
+        try:
+            import ctypes
+            hwnd = int(window.winId())
+            ico_str = str(ico_path)
+            # IMAGE_ICON = 1, LR_LOADFROMFILE = 0x10
+            hicon_big = ctypes.windll.user32.LoadImageW(None, ico_str, 1, 32, 32, 0x00000010)
+            hicon_small = ctypes.windll.user32.LoadImageW(None, ico_str, 1, 16, 16, 0x00000010)
+            if hicon_big:
+                ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 1, hicon_big)
+            if hicon_small:
+                ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 0, hicon_small)
+        except Exception as e:
+            logger.debug("No se pudo forzar WM_SETICON nativo: %s", e)
+
     sys.exit(app.exec())
 
 
