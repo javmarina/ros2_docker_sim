@@ -256,26 +256,106 @@ def download_and_apply_exe_update(
     progress_cb(95.0, "Preparando reinicio con la nueva versión...")
 
     # En Windows, un ejecutable en ejecución no puede ser sobreescrito directamente.
-    # Lanzamos un proceso PowerShell o script por lotes desacoplado que espera a que
-    # este proceso muera, mueve el nuevo .exe sobre el actual y lo vuelve a lanzar.
+    # Lanzamos un proceso en segundo plano (PowerShell) que espera a que este proceso termine,
+    # reemplaza el ejecutable actual por el descargado con control de reintentos y vuelve a lanzar la app.
     pid = os.getpid()
     
-    # Crear un script de ayuda en %TEMP%
-    updater_bat = Path(tempfile.gettempdir()) / f"ros2_updater_{pid}.bat"
-    bat_content = f"""@echo off
-chcp 65001 > nul
+    if platform.system().lower() == "windows":
+        updater_ps1 = Path(tempfile.gettempdir()) / f"ros2_updater_{pid}.ps1"
+        ps_current_exe = str(current_exe).replace("'", "''")
+        ps_temp_new_exe = str(temp_new_exe).replace("'", "''")
+        log_file = Path(tempfile.gettempdir()) / "ros2_updater.log"
+        ps_log_file = str(log_file).replace("'", "''")
+
+        ps_content = f"""# Script de actualizacion automatica de ROS 2 Sim Launcher
+$ErrorActionPreference = 'SilentlyContinue'
+$targetExe = '{ps_current_exe}'
+$newExe = '{ps_temp_new_exe}'
+$targetPid = {pid}
+$logFile = '{ps_log_file}'
+
+function Log($msg) {{
+    "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $msg" | Out-File -Append -FilePath $logFile -Encoding utf8
+}}
+
+Log "Iniciando actualizacion para PID $targetPid..."
+# 1. Esperar a que el proceso anterior muera completamente (hasta 30 segundos)
+try {{
+    Wait-Process -Id $targetPid -Timeout 30 -ErrorAction SilentlyContinue
+}} catch {{}}
+
+# Espera de seguridad para liberar descriptores de archivo del sistema y antivirus
+Start-Sleep -Milliseconds 1200
+
+# 2. Reemplazo del archivo con bucle de reintentos
+$replaced = $false
+for ($i = 0; $i -lt 15; $i++) {{
+    try {{
+        Copy-Item -LiteralPath $newExe -Destination $targetExe -Force -ErrorAction Stop
+        $replaced = $true
+        Log "Ejecutable reemplazado exitosamente en el intento $i."
+        break
+    }} catch {{
+        Log "Intento $i: no se pudo sobrescribir, reintentando en 500ms..."
+        Start-Sleep -Milliseconds 500
+    }}
+}}
+
+# 3. Si se reemplazo correctamente, lanzar la nueva version y limpiar
+if ($replaced -and (Test-Path -LiteralPath $targetExe)) {{
+    Log "Lanzando nueva version: $targetExe"
+    Start-Process -FilePath $targetExe
+    Start-Sleep -Milliseconds 600
+    Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue
+    Log "Actualizacion finalizada con exito."
+}} else {{
+    Log "ERROR: No se pudo reemplazar el archivo tras varios intentos."
+}}
+
+# Auto-eliminacion del script temporal
+Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
+"""
+        try:
+            updater_ps1.write_text(ps_content, encoding="utf-8")
+            progress_cb(100.0, "¡Actualización lista! Reiniciando launcher...")
+
+            # Buscar ejecutable powershell nativo
+            sys_root = os.environ.get("WINDIR", "C:\\Windows")
+            ps_native = Path(sys_root) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+            ps_cmd = str(ps_native) if ps_native.is_file() else "powershell.exe"
+
+            creationflags = subprocess.CREATE_NO_WINDOW if platform.system().lower() == "windows" else 0
+
+            subprocess.Popen(
+                [
+                    ps_cmd,
+                    "-ExecutionPolicy", "Bypass",
+                    "-WindowStyle", "Hidden",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-File", str(updater_ps1)
+                ],
+                creationflags=creationflags,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True
+            )
+            return True, "Reiniciando..."
+        except Exception as e_ps:
+            logger.warning("No se pudo iniciar updater con PowerShell (%s), usando fallback .bat...", e_ps)
+            updater_bat = Path(tempfile.gettempdir()) / f"ros2_updater_{pid}.bat"
+            bat_content = f"""@echo off
 set PID={pid}
 set NEW_EXE="{temp_new_exe}"
 set TARGET_EXE="{current_exe}"
 
 :wait_loop
-tasklist /FI "PID eq %PID%" 2>NUL | find /I /N "%PID%">NUL
-if "%ERRORLEVEL%"=="0" (
-    timeout /t 1 /nobreak > nul
-    goto wait_loop
-)
+ping 127.0.0.1 -n 2 > nul
+tasklist /fi "PID eq %PID%" 2>nul | findstr /i "%PID%" > nul
+if "%ERRORLEVEL%"=="0" goto wait_loop
 
-timeout /t 1 /nobreak > nul
+ping 127.0.0.1 -n 2 > nul
 copy /y %NEW_EXE% %TARGET_EXE% > nul
 if exist %TARGET_EXE% (
     del /f /q %NEW_EXE% > nul
@@ -283,24 +363,49 @@ if exist %TARGET_EXE% (
 )
 del "%~f0" > nul
 """
-    try:
-        updater_bat.write_text(bat_content, encoding="utf-8")
-        progress_cb(100.0, "¡Actualización lista! Reiniciando launcher...")
-        
-        # Lanzar bat en modo desacoplado
-        creationflags = 0
-        if platform.system().lower() == "windows":
-            creationflags = subprocess.CREATE_NO_WINDOW | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-
-        subprocess.Popen(
-            ["cmd.exe", "/c", str(updater_bat)],
-            creationflags=creationflags,
-            close_fds=True
-        )
-        return True, "Reiniciando..."
-    except Exception as e:
-        logger.error("Error al programar sustitución de ejecutable: %s", e)
-        return False, f"No se pudo programar el reinicio: {e}"
+            try:
+                updater_bat.write_text(bat_content, encoding="utf-8")
+                creationflags = subprocess.CREATE_NO_WINDOW if platform.system().lower() == "windows" else 0
+                subprocess.Popen(
+                    ["cmd.exe", "/c", str(updater_bat)],
+                    creationflags=creationflags,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    close_fds=True
+                )
+                return True, "Reiniciando..."
+            except Exception as e_bat:
+                logger.error("Error al programar sustitución de ejecutable: %s", e_bat)
+                return False, f"No se pudo programar el reinicio: {e_bat}"
+    else:
+        updater_sh = Path(tempfile.gettempdir()) / f"ros2_updater_{pid}.sh"
+        sh_content = f"""#!/bin/sh
+while kill -0 {pid} 2>/dev/null; do
+    sleep 0.5
+done
+sleep 0.5
+cp -f "{temp_new_exe}" "{current_exe}"
+chmod +x "{current_exe}"
+rm -f "{temp_new_exe}"
+"{current_exe}" &
+rm -f "$0"
+"""
+        try:
+            updater_sh.write_text(sh_content, encoding="utf-8")
+            updater_sh.chmod(0o755)
+            progress_cb(100.0, "¡Actualización lista! Reiniciando launcher...")
+            subprocess.Popen(
+                ["/bin/sh", str(updater_sh)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True
+            )
+            return True, "Reiniciando..."
+        except Exception as e:
+            logger.error("Error al programar script de actualización Unix: %s", e)
+            return False, f"No se pudo programar el reinicio: {e}"
 
 
 def download_and_extract_zip_update(
@@ -372,9 +477,19 @@ def download_and_extract_zip_update(
 
 def restart_application():
     """Reinicia la aplicación según si se ejecuta como ejecutable congelado o como script."""
+    app = QtWidgets.QApplication.instance()
     if is_running_frozen():
-        # Para binarios congelados, el helper .bat se encarga del relanzamiento tras el cierre
-        sys.exit(0)
+        # Para binarios congelados, el proceso auxiliar en segundo plano se encarga
+        # de esperar a que este proceso muera, reemplazar el .exe y relanzarlo.
+        # Es fundamental cerrar todas las ventanas y forzar os._exit(0) para liberar
+        # el descriptor del archivo ejecutable de inmediato sin bloqueos de hilos o bucle Qt.
+        try:
+            if app:
+                app.closeAllWindows()
+                app.quit()
+        except Exception:
+            pass
+        os._exit(0)
     else:
         python_bin = sys.executable
         script_path = str(Path(sys.argv[0]).resolve())
@@ -384,7 +499,13 @@ def restart_application():
             subprocess.Popen(args, cwd=app_dir)
         except Exception as e:
             logger.error("restart_application error: %s", e)
-        sys.exit(0)
+        try:
+            if app:
+                app.closeAllWindows()
+                app.quit()
+        except Exception:
+            pass
+        os._exit(0)
 
 
 class UpdateWorkerSignals(QtCore.QObject):
