@@ -1,5 +1,5 @@
 {
-  "version": "1.0.8",
+  "version": "1.0.9",
   "release_date": "2026-09-14",
   "changelog": "Corrección de errores",
   "download_url": "https://github.com/javmarina/ros2_docker_sim/releases/latest/download/ros2_sim_launcher.exe",
