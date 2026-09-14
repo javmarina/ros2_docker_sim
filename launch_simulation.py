@@ -272,6 +272,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     sig_docker_status = QtCore.Signal(bool, bool, str)  # (installed, running, daemon_msg)
     sig_docker_ready = QtCore.Signal(str)
     sig_docker_failed = QtCore.Signal(str)
+    sig_log_received = QtCore.Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -282,6 +283,8 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         # Gestor de configuración persistente (guarda en AppData)
         self.config_store = ConfigStore(fallback_dir=Path(__file__).parent.resolve())
         self.active_sim_thread: Optional[ProcessRunnerThread] = None
+        self.active_cmd_thread: Optional[ProcessRunnerThread] = None
+        self.compile_runner: Optional[ProcessRunnerThread] = None
         self.autoscroll_enabled = True
         self.ansi_parser = AnsiColorParser()
         self.latest_update_info: Optional[Dict] = None
@@ -297,6 +300,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.sig_docker_status.connect(self._apply_docker_status)
         self.sig_docker_ready.connect(self._on_docker_ready)
         self.sig_docker_failed.connect(self._on_docker_start_failed)
+        self.sig_log_received.connect(self._append_log_main_thread)
 
         self._setup_window_icon()
         self._apply_global_styles()
@@ -1708,16 +1712,22 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.tab_widget.setCurrentIndex(1)  # Tab Logs
         self._append_log(f"\n>>> Ejecutando comando en contenedor: {cmd_str}\n")
 
-        def _worker():
-            proc = DockerService.execute_in_container_stream(DEFAULT_CONTAINER_NAME, cmd_str, self._append_log)
-            if proc:
-                for line in iter(proc.stdout.readline, ''):
-                    self._append_log(line)
-                proc.stdout.close()
-                rc = proc.wait()
-                self._append_log(f"\n[Comando finalizado con código {rc}]\n")
+        docker_cmd = DockerService.get_container_exec_args(DEFAULT_CONTAINER_NAME, cmd_str)
 
-        threading.Thread(target=_worker, daemon=True).start()
+        # Detener comando previo si aún está corriendo
+        if self.active_cmd_thread and self.active_cmd_thread.isRunning():
+            self.active_cmd_thread.terminate_process()
+            self.active_cmd_thread.wait(500)
+
+        self.active_cmd_thread = ProcessRunnerThread(docker_cmd)
+        self.active_cmd_thread.signals.line_received.connect(self._append_log)
+        self.active_cmd_thread.signals.finished.connect(
+            lambda rc: self._append_log(f"\n[Comando finalizado con código {rc}]\n")
+        )
+        self.active_cmd_thread.signals.error.connect(
+            lambda err: self._append_log(f"\n[Error al ejecutar comando: {err}]\n")
+        )
+        self.active_cmd_thread.start()
 
     def _on_run_custom_command(self):
         cmd = self.ent_custom_cmd.text().strip()
@@ -1752,10 +1762,10 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 "source /opt/ros/jazzy/setup.bash && cd /ros2_ws && colcon build --symlink-install"
             ])
 
-            runner = ProcessRunnerThread(build_cmd)
-            runner.signals.line_received.connect(self._append_log)
-            runner.signals.finished.connect(self._on_compile_finished)
-            runner.start()
+            self.compile_runner = ProcessRunnerThread(build_cmd)
+            self.compile_runner.signals.line_received.connect(self._append_log)
+            self.compile_runner.signals.finished.connect(self._on_compile_finished)
+            self.compile_runner.start()
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -1836,6 +1846,14 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
     @QtCore.Slot(str)
     def _append_log(self, text: str):
+        # Si se invoca desde un hilo en segundo plano, encolar mediante la señal Qt
+        # para garantizar que toda modificación de widgets de texto se ejecute en el hilo principal GUI.
+        if QtCore.QThread.currentThread() != self.thread():
+            self.sig_log_received.emit(text)
+            return
+        self._append_log_main_thread(text)
+
+    def _append_log_main_thread(self, text: str):
         cursor = self.txt_logs.textCursor()
         cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
         self.ansi_parser.parse_to_cursor(text, cursor)
@@ -1880,6 +1898,15 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.warning(self, title, text)
 
     def closeEvent(self, event: QtGui.QCloseEvent):
+        # Detener temporizadores activos para evitar advertencias de Qt al cerrar
+        if self._docker_poll_timer and self._docker_poll_timer.isActive():
+            self._docker_poll_timer.stop()
+
+        # Detener comandos secundarios si continúan activos
+        if self.active_cmd_thread and self.active_cmd_thread.isRunning():
+            self.active_cmd_thread.terminate_process()
+            self.active_cmd_thread.wait(500)
+
         # Si hay una simulación en curso, advertir al usuario
         if DockerService.is_container_running(DEFAULT_CONTAINER_NAME):
             answer = QtWidgets.QMessageBox.question(

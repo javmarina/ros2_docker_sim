@@ -271,68 +271,41 @@ class DockerService:
     def open_container_terminal(cls, container_name: str = DEFAULT_CONTAINER_NAME) -> Tuple[bool, str]:
         """
         Abre una terminal interactiva nativa conectada al contenedor con el entorno ROS 2 ya cargado.
-        En Windows prioriza Windows Terminal (wt.exe), con fallback a PowerShell y CMD.
         """
-        logger.info("Solicitud para abrir terminal interactiva en contenedor '%s'", container_name)
-        if not cls.is_container_running(container_name):
-            logger.warning("open_container_terminal: Contenedor '%s' no está corriendo", container_name)
+        logger.info("[Terminal] Solicitud recibida para abrir terminal interactiva en contenedor '%s'", container_name)
+        running = cls.is_container_running(container_name)
+        logger.info("[Terminal] Estado del contenedor '%s': running=%s", container_name, running)
+        if not running:
+            logger.warning("[Terminal] Contenedor '%s' no está corriendo", container_name)
             return False, f"El contenedor '{container_name}' no está en ejecución. Inicia la simulación primero."
 
         host_os = cls.get_host_os()
-        # Comando para iniciar sesión con ROS 2 y workspace ya cargados.
-        # Evitamos punto y coma (;) porque Windows Terminal (wt.exe) lo interpreta como separador de pestañas/comandos.
+        logger.info("[Terminal] Sistema operativo detectado: %s", host_os)
+
         bash_init = (
             "source /opt/ros/jazzy/setup.bash && "
-            "[ ! -f /ros2_ws/install/setup.bash ] || source /ros2_ws/install/setup.bash && "
+            "test ! -f /ros2_ws/install/setup.bash || source /ros2_ws/install/setup.bash && "
             "cd /ros2_ws && exec bash"
         )
 
         try:
             if host_os == "windows":
-                # Intentar detectar Windows Terminal (wt.exe)
-                wt_path = shutil.which("wt")
-                if not wt_path:
-                    # Comprobar ruta estándar en WindowsApps
-                    local_appdata = os.getenv("LOCALAPPDATA", "")
-                    candidate = Path(local_appdata) / "Microsoft" / "WindowsApps" / "wt.exe"
-                    if candidate.exists():
-                        wt_path = str(candidate)
-
-                if wt_path:
-                    # Iniciar nueva pestaña o ventana con Windows Terminal
-                    wt_cmd = [
-                        wt_path, "-w", "0", "nt",
-                        "--title", f"ROS 2 Jazzy - {container_name}",
-                        "docker", "exec", "-it", container_name,
-                        "bash", "-c", bash_init
-                    ]
-                    subprocess.Popen(wt_cmd)
-                    return True, "Terminal abierta en Windows Terminal."
-                
-                # Fallback: PowerShell nativo
-                ps_path = shutil.which("powershell")
-                if ps_path:
-                    ps_cmd = [
-                        ps_path, "-NoExit", "-Command",
-                        f'docker exec -it {container_name} bash -c "{bash_init}"'
-                    ]
-                    subprocess.Popen(ps_cmd, creationflags=WIN32_NEW_CONSOLE)
-                    return True, "Terminal abierta en PowerShell."
-
-                # Fallback final: CMD
-                cmd_cmd = [
-                    "cmd.exe", "/k",
-                    f'docker exec -it {container_name} bash -c "{bash_init}"'
-                ]
-                subprocess.Popen(cmd_cmd, creationflags=WIN32_NEW_CONSOLE)
-                return True, "Terminal abierta en Símbolo del sistema (CMD)."
+                # Al pasar la orden como string simple a subprocess.Popen, Python no introduce barras de escape (\")
+                # con list2cmdline, permitiendo que 'start' reconozca correctamente el título y ejecute docker.
+                cmd = f'cmd.exe /c start "ROS 2 Jazzy - {container_name}" docker exec -it {container_name} bash'
+                logger.info("[Terminal] Comando a ejecutar en Windows: %s", cmd)
+                proc = subprocess.Popen(cmd)
+                logger.info("[Terminal] Proceso lanzado con éxito. PID: %s", proc.pid)
+                return True, f"Terminal abierta en nueva ventana (PID: {proc.pid})."
 
             elif host_os == "mac":
                 script = (
                     f'tell application "Terminal" to do script '
                     f'"docker exec -it {container_name} bash -c \\"{bash_init}\\""'
                 )
-                subprocess.Popen(["osascript", "-e", script])
+                logger.info("[Terminal] Ejecutando osascript en macOS...")
+                proc = subprocess.Popen(["osascript", "-e", script])
+                logger.info("[Terminal] osascript lanzado con PID: %s", proc.pid)
                 return True, "Terminal abierta en Terminal de macOS."
 
             else:
@@ -340,18 +313,39 @@ class DockerService:
                 for term in ["x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"]:
                     term_path = shutil.which(term)
                     if term_path:
-                        subprocess.Popen([
+                        logger.info("[Terminal] Emulador Linux encontrado: %s", term_path)
+                        proc = subprocess.Popen([
                             term_path, "-e",
                             f'docker exec -it {container_name} bash -c "{bash_init}"'
                         ])
+                        logger.info("[Terminal] Terminal lanzada con PID: %s", proc.pid)
                         return True, f"Terminal abierta en {term}."
+                logger.error("[Terminal] No se encontró ningún emulador de terminal compatible en Linux")
                 return False, "No se encontró ningún emulador de terminal compatible en el sistema."
 
         except Exception as e:
+            logger.exception("[Terminal] Excepción al intentar abrir la terminal: %s", e)
             return False, f"Error al abrir la terminal: {str(e)}"
 
-    @staticmethod
+    @classmethod
+    def get_container_exec_args(cls, container_name: str, command_str: str) -> List[str]:
+        """
+        Construye la lista de argumentos para ejecutar un comando dentro del contenedor
+        cargando de forma segura el entorno de ROS 2 y el workspace.
+        """
+        full_cmd = (
+            "source /opt/ros/jazzy/setup.bash && "
+            "test ! -f /ros2_ws/install/setup.bash || source /ros2_ws/install/setup.bash; "
+            f"{command_str}"
+        )
+        return [
+            "docker", "exec", container_name,
+            "/bin/bash", "-c", full_cmd
+        ]
+
+    @classmethod
     def execute_in_container_stream(
+        cls,
         container_name: str,
         command_str: str,
         log_cb: Callable[[str], None]
@@ -360,15 +354,7 @@ class DockerService:
         Ejecuta un comando no interactivo dentro del contenedor y transmite su salida.
         Útil para botones de comandos rápidos (ros2 topic list, colcon build, etc.).
         """
-        full_cmd = (
-            "source /opt/ros/jazzy/setup.bash && "
-            "[ ! -f /ros2_ws/install/setup.bash ] || source /ros2_ws/install/setup.bash && "
-            f"{command_str}"
-        )
-        docker_cmd = [
-            "docker", "exec", container_name,
-            "/bin/bash", "-c", full_cmd
-        ]
+        docker_cmd = cls.get_container_exec_args(container_name, command_str)
 
         try:
             proc = subprocess.Popen(
