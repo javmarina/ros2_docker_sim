@@ -1,0 +1,99 @@
+name: Build and Release Windows Executable
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ros2_sim_launcher.exe
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Read version from version.json
+        id: get_version
+        shell: pwsh
+        run: |
+          if (Test-Path "version.json") {
+            $json = Get-Content "version.json" -Raw | ConvertFrom-Json
+            $ver = $json.version
+          } else {
+            $ver = "1.0.5"
+          }
+          Write-Output "APP_VERSION=$ver" >> $env:GITHUB_ENV
+          Write-Output "Detected version: $ver"
+
+      - name: Build Standalone Executable with PyInstaller
+        run: |
+          pyinstaller --clean ros2_sim_launcher.spec
+
+      - name: Verify Executable Exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/ros2_sim_launcher.exe")) {
+            Write-Error "El ejecutable dist/ros2_sim_launcher.exe no se generó correctamente."
+            exit 1
+          }
+          $sizeMb = (Get-Item "dist/ros2_sim_launcher.exe").Length / 1MB
+          Write-Output "Ejecutable generado con éxito: $('{0:N2}' -f $sizeMb) MB"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ros2_sim_launcher-v${{ env.APP_VERSION }}
+          path: dist/ros2_sim_launcher.exe
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish or Update Latest Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: latest
+          name: "ROS 2 Launcher v${{ env.APP_VERSION }}"
+          body: |
+            ## ROS 2 Jazzy Simulation Launcher (Windows Standalone)
+
+            Compilación automática generada desde el commit `${{ github.sha }}` de la rama `main`.
+
+            ### 🚀 Descarga directa:
+            - **[ros2_sim_launcher.exe](https://github.com/${{ github.repository }}/releases/latest/download/ros2_sim_launcher.exe)** (Versión v${{ env.APP_VERSION }})
+
+            ### 📋 Novedades:
+            - Interfaz gráfica moderna con PySide6 (Qt6).
+            - Auto-actualización integrada con un clic.
+            - Compatible con Windows 10/11 x64 y Docker Desktop.
+          files: dist/ros2_sim_launcher.exe
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish Version Tag Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: "Release v${{ env.APP_VERSION }}"
+          files: dist/ros2_sim_launcher.exe
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
