@@ -21,6 +21,7 @@ DEFAULT_CONTAINER_NAME = "ros2_jazzy_nav_sim"
 COURSE_IMAGE_NAME = "ros2-jazzy-nav-course:latest"
 DEFAULT_NOVNC_PORT = 6080
 WIN32_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+WIN32_NEW_CONSOLE = subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
 
 
 class DockerService:
@@ -278,10 +279,11 @@ class DockerService:
             return False, f"El contenedor '{container_name}' no está en ejecución. Inicia la simulación primero."
 
         host_os = cls.get_host_os()
-        # Comando para iniciar sesión con ROS 2 y workspace ya cargados
+        # Comando para iniciar sesión con ROS 2 y workspace ya cargados.
+        # Evitamos punto y coma (;) porque Windows Terminal (wt.exe) lo interpreta como separador de pestañas/comandos.
         bash_init = (
             "source /opt/ros/jazzy/setup.bash && "
-            "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi && "
+            "[ ! -f /ros2_ws/install/setup.bash ] || source /ros2_ws/install/setup.bash && "
             "cd /ros2_ws && exec bash"
         )
 
@@ -310,19 +312,19 @@ class DockerService:
                 # Fallback: PowerShell nativo
                 ps_path = shutil.which("powershell")
                 if ps_path:
-                    ps_cmd = (
-                        f'start "ROS 2 Jazzy Terminal" powershell -NoExit -Command '
-                        f'& {{ docker exec -it {container_name} bash -c "{bash_init}" }}'
-                    )
-                    subprocess.Popen(["cmd.exe", "/c", ps_cmd])
+                    ps_cmd = [
+                        ps_path, "-NoExit", "-Command",
+                        f'docker exec -it {container_name} bash -c "{bash_init}"'
+                    ]
+                    subprocess.Popen(ps_cmd, creationflags=WIN32_NEW_CONSOLE)
                     return True, "Terminal abierta en PowerShell."
 
                 # Fallback final: CMD
-                cmd_cmd = (
-                    f'start "ROS 2 Jazzy Terminal" cmd /k '
+                cmd_cmd = [
+                    "cmd.exe", "/k",
                     f'docker exec -it {container_name} bash -c "{bash_init}"'
-                )
-                subprocess.Popen(["cmd.exe", "/c", cmd_cmd])
+                ]
+                subprocess.Popen(cmd_cmd, creationflags=WIN32_NEW_CONSOLE)
                 return True, "Terminal abierta en Símbolo del sistema (CMD)."
 
             elif host_os == "mac":
@@ -360,7 +362,7 @@ class DockerService:
         """
         full_cmd = (
             "source /opt/ros/jazzy/setup.bash && "
-            "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi && "
+            "[ ! -f /ros2_ws/install/setup.bash ] || source /ros2_ws/install/setup.bash && "
             f"{command_str}"
         )
         docker_cmd = [
@@ -402,12 +404,12 @@ class DockerService:
         """
         docker_cmd = [
             "docker", "run", "--rm",
-            "-it",
             "--name", container_name,
             "-p", f"{web_port}:6080",
             "-e", f"ROS_DOMAIN_ID={domain_id}",
             "-e", f"ROBOT_MODEL={robot_model}",
             "-e", "RCUTILS_COLORIZED_OUTPUT=1",
+            "-e", "PYTHONUNBUFFERED=1",
             "-e", "DISPLAY=:99",
             "-e", "QT_X11_NO_MITSHM=1",
             "-e", "LIBGL_ALWAYS_SOFTWARE=1",
