@@ -278,38 +278,51 @@ function Log($msg) {{
     "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $msg" | Out-File -Append -FilePath $logFile -Encoding utf8
 }}
 
-Log "Iniciando actualizacion para PID $targetPid..."
-# 1. Esperar a que el proceso anterior muera completamente (hasta 30 segundos)
 try {{
-    Wait-Process -Id $targetPid -Timeout 30 -ErrorAction SilentlyContinue
-}} catch {{}}
-
-# Espera de seguridad para liberar descriptores de archivo del sistema y antivirus
-Start-Sleep -Milliseconds 1200
-
-# 2. Reemplazo del archivo con bucle de reintentos
-$replaced = $false
-for ($i = 0; $i -lt 15; $i++) {{
+    Log "Iniciando actualizacion para PID $targetPid..."
+    # 1. Esperar a que el proceso anterior muera completamente (hasta 30 segundos)
     try {{
-        Copy-Item -LiteralPath $newExe -Destination $targetExe -Force -ErrorAction Stop
-        $replaced = $true
-        Log "Ejecutable reemplazado exitosamente en el intento $i."
-        break
-    }} catch {{
-        Log "Intento $i: no se pudo sobrescribir, reintentando en 500ms..."
-        Start-Sleep -Milliseconds 500
-    }}
-}}
+        Wait-Process -Id $targetPid -Timeout 30 -ErrorAction SilentlyContinue
+    }} catch {{}}
 
-# 3. Si se reemplazo correctamente, lanzar la nueva version y limpiar
-if ($replaced -and (Test-Path -LiteralPath $targetExe)) {{
-    Log "Lanzando nueva version: $targetExe"
-    Start-Process -FilePath $targetExe
-    Start-Sleep -Milliseconds 600
-    Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue
-    Log "Actualizacion finalizada con exito."
-}} else {{
-    Log "ERROR: No se pudo reemplazar el archivo tras varios intentos."
+    # Espera de seguridad para liberar descriptores de archivo del sistema y antivirus
+    Start-Sleep -Milliseconds 1200
+
+    # Desbloquear archivo descargado (quitar Zone.Identifier / Mark-of-the-Web)
+    Unblock-File -LiteralPath $newExe -ErrorAction SilentlyContinue
+
+    # 2. Reemplazo del archivo con bucle de reintentos
+    $replaced = $false
+    for ($i = 0; $i -lt 15; $i++) {{
+        try {{
+            Copy-Item -LiteralPath $newExe -Destination $targetExe -Force -ErrorAction Stop
+            $replaced = $true
+            Log "Ejecutable reemplazado exitosamente en el intento $i"
+            break
+        }} catch {{
+            Log "Intento $i fallo al sobrescribir, reintentando..."
+            Start-Sleep -Milliseconds 500
+        }}
+    }}
+
+    # 3. Si se reemplazo correctamente, lanzar la nueva version y limpiar
+    if ($replaced -and (Test-Path -LiteralPath $targetExe)) {{
+        Unblock-File -LiteralPath $targetExe -ErrorAction SilentlyContinue
+        $workDir = Split-Path -Path $targetExe -Parent
+        Log "Lanzando nueva version en $workDir : $targetExe"
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $targetExe
+        $psi.WorkingDirectory = $workDir
+        $psi.UseShellExecute = $true
+        [System.Diagnostics.Process]::Start($psi)
+        Start-Sleep -Milliseconds 600
+        Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue
+        Log "Actualizacion finalizada con exito."
+    }} else {{
+        Log "ERROR: No se pudo reemplazar el archivo tras varios intentos."
+    }}
+}} catch {{
+    Log "ERROR CRITICO EN UPDATER: $($_.Exception.Message)"
 }}
 
 # Auto-eliminacion del script temporal
