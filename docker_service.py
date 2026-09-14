@@ -83,6 +83,112 @@ class DockerService:
         except Exception as e:
             return False, str(e)
 
+    @classmethod
+    def find_docker_desktop_path(cls) -> Optional[Path]:
+        """Busca la ruta del ejecutable de Docker Desktop en el sistema."""
+        host_os = cls.get_host_os()
+        if host_os == "windows":
+            candidates = [
+                Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Docker" / "Docker" / "Docker Desktop.exe",
+                Path(r"C:\Program Files\Docker\Docker\Docker Desktop.exe"),
+                Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Docker" / "Docker" / "Docker Desktop.exe",
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Docker" / "Docker Desktop.exe",
+                Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "DockerDesktop" / "Docker Desktop.exe",
+            ]
+            for p in candidates:
+                if p.is_file():
+                    return p
+
+            # Buscar en PATH
+            which_p = shutil.which("Docker Desktop.exe") or shutil.which("Docker Desktop")
+            if which_p:
+                p = Path(which_p)
+                if p.is_file():
+                    return p
+
+            # Buscar ruta en el registro de Windows
+            reg_cand = cls._find_docker_in_windows_registry()
+            if reg_cand:
+                return reg_cand
+
+        elif host_os == "mac":
+            mac_cand = Path("/Applications/Docker.app")
+            if mac_cand.exists():
+                return mac_cand
+
+        return None
+
+    @staticmethod
+    def _find_docker_in_windows_registry() -> Optional[Path]:
+        """Consulta directa en el registro de desinstalación de Windows."""
+        try:
+            import winreg
+            sub_key = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop"
+            for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+                try:
+                    with winreg.OpenKey(root, sub_key) as k:
+                        loc, _ = winreg.QueryValueEx(k, "InstallLocation")
+                        cand = Path(loc) / "Docker Desktop.exe"
+                        if cand.is_file():
+                            return cand
+                except OSError:
+                    continue
+        except Exception:
+            pass
+        return None
+
+    @classmethod
+    def start_docker_desktop(cls) -> Tuple[bool, str]:
+        """
+        Inicia Docker Desktop en el sistema anfitrión si no está corriendo.
+        Retorna (éxito, mensaje).
+        """
+        running, _ = cls.check_docker_running()
+        if running:
+            return True, "Docker Desktop ya se encuentra en ejecución."
+
+        host_os = cls.get_host_os()
+        if host_os == "windows":
+            exe_path = cls.find_docker_desktop_path()
+            if not exe_path:
+                return False, (
+                    "No se encontró el ejecutable de Docker Desktop en las ubicaciones estándar.\n"
+                    "Por favor comprueba que Docker Desktop esté instalado en tu sistema Windows."
+                )
+
+            logger.info("Iniciando Docker Desktop desde: %s", exe_path)
+            try:
+                # Usar os.startfile para ejecución no bloqueante desacoplada de la consola
+                if hasattr(os, "startfile"):
+                    os.startfile(str(exe_path))
+                else:
+                    subprocess.Popen([str(exe_path)], close_fds=True)
+                return True, "Arrancando Docker Desktop en Windows..."
+            except Exception as e:
+                logger.warning("Fallo al iniciar con startfile, intentando con Popen: %s", e)
+                try:
+                    subprocess.Popen([str(exe_path)], close_fds=True)
+                    return True, "Arrancando Docker Desktop en Windows..."
+                except Exception as e2:
+                    logger.error("Error al arrancar Docker Desktop: %s", e2, exc_info=True)
+                    return False, f"No se pudo arrancar Docker Desktop: {e2}"
+
+        elif host_os == "mac":
+            try:
+                subprocess.Popen(["open", "-a", "Docker"])
+                return True, "Arrancando Docker en macOS..."
+            except Exception as e:
+                return False, f"Error al arrancar Docker en macOS: {e}"
+
+        else:
+            # Linux: intentar iniciar el servicio docker
+            try:
+                subprocess.Popen(["sudo", "systemctl", "start", "docker"])
+                return True, "Iniciando servicio Docker (systemctl)..."
+            except Exception as e:
+                return False, f"Error al iniciar servicio Docker en Linux: {e}"
+
+
     @staticmethod
     def is_container_running(container_name: str = DEFAULT_CONTAINER_NAME) -> bool:
         """Verifica si el contenedor especificado está actualmente en ejecución."""

@@ -54,7 +54,7 @@ from updater import (
     UpdateModalDialog,
     DEFAULT_GITHUB_REPO
 )
-from embedded_icon import get_app_icon_path
+from embedded_icon import get_app_icon_path, get_dropdown_arrow_path, get_themed_icon
 
 # Dockerfile de respaldo en caso de que no exista en el directorio
 DOCKERFILE_CONTENT = r"""# Dockerfile for University Course on Navigation and ROS 2 Jazzy
@@ -118,13 +118,13 @@ RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc \
 CMD ["/bin/bash"]
 """
 
-GUIDE_MARKDOWN = """# 📚 Guía de Simulación y Navegación ROS 2 Jazzy
+GUIDE_MARKDOWN = """# Guía de Simulación y Navegación ROS 2 Jazzy
 
 Este entorno ejecuta **ROS 2 Jazzy**, **Gazebo Sim** y **Navigation2 (Nav2)** dentro de un contenedor Docker con interfaz gráfica accesible directamente desde el navegador web (noVNC).
 
 ---
 
-### 🌐 1. Interfaz Gráfica Web (Gazebo y RViz2)
+### 1. Interfaz Gráfica Web (Gazebo y RViz2)
 - No necesitas instalar servidores X11 (XQuartz o VcXsrv) en tu ordenador.
 - Al iniciar la simulación, el navegador se abrirá automáticamente en:
   **`http://localhost:6080/vnc.html`**
@@ -132,8 +132,8 @@ Este entorno ejecuta **ROS 2 Jazzy**, **Gazebo Sim** y **Navigation2 (Nav2)** de
 
 ---
 
-### 💻 2. Terminal Docker Nativo (Windows Terminal / PowerShell)
-- Pulsa el botón **"💻 Abrir Terminal Docker"** en la barra de acciones superior.
+### 2. Terminal Docker Nativo (Windows Terminal / PowerShell)
+- Pulsa el botón **"Abrir Terminal Docker"** en la barra de acciones superior.
 - Se abrirá automáticamente una ventana de terminal conectada al contenedor.
 - El entorno de ROS 2 ya está cargado con los paquetes del sistema y tu workspace:
   - `ros2 topic list`
@@ -142,27 +142,27 @@ Este entorno ejecuta **ROS 2 Jazzy**, **Gazebo Sim** y **Navigation2 (Nav2)** de
 
 ---
 
-### 📁 3. Espacio de Trabajo (Workspace en Windows)
+### 3. Espacio de Trabajo (Workspace en Windows)
 - La carpeta seleccionada en "Espacio de Trabajo" se monta automáticamente en:
   **`/ros2_ws/src`**
 - Puedes editar tus paquetes y nodos de ROS 2 en Windows usando tu editor preferido (VS Code, etc.).
 - Cualquier cambio en Windows se sincroniza instantáneamente con Docker.
-- Para compilar tus paquetes, pulsa **"🔨 Compilar Workspace"** o escribe `colcon build` en la terminal.
+- Para compilar tus paquetes, pulsa **"Compilar Workspace"** o escribe `colcon build` en la terminal.
 
 ---
 
-### 🤖 4. Guía Rápida de Prácticas
+### 4. Guía Rápida de Prácticas
 
 #### A. Mapeo con SLAM Toolbox
 1. Selecciona el escenario: **"Gazebo Sim + SLAM Toolbox (Modo mapeo)"**.
-2. Pulsa **"🚀 Iniciar Simulación"**.
-3. Abre una terminal con **"💻 Abrir Terminal Docker"** y pilota el robot:
+2. Pulsa **"Iniciar Simulación"**.
+3. Abre una terminal con **"Abrir Terminal Docker"** y pilota el robot:
    `ros2 run teleop_twist_keyboard teleop_twist_keyboard`
 4. Una vez completado el mapa, guárdalo desde el plugin de SLAM en RViz2 o desde la terminal.
 
 #### B. Navegación Autónoma con Nav2
 1. Selecciona el escenario: **"Gazebo Sim + Nav2 (Navegación completa y RViz2)"**.
-2. Pulsa **"🚀 Iniciar Simulación"**.
+2. Pulsa **"Iniciar Simulación"**.
 3. En RViz2, fija la posición inicial estimada con la herramienta **"2D Pose Estimate"**.
 4. Envía metas de navegación pulsando **"Nav2 Goal"** en el mapa.
 """
@@ -266,9 +266,14 @@ class AnsiColorParser:
 class ModernSimulationLauncher(QtWidgets.QMainWindow):
     """Ventana principal del launcher con PySide6, High-DPI y estilo profesional moderno."""
 
+    sig_manual_update_result = QtCore.Signal(bool, object, str)
+    sig_docker_status = QtCore.Signal(bool, bool, str)  # (installed, running, daemon_msg)
+    sig_docker_ready = QtCore.Signal(str)
+    sig_docker_failed = QtCore.Signal(str)
+
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"ROS 2 Jazzy - Launcher de Simulación (v{CURRENT_VERSION}) | Sistemas de Navegación")
+        self.setWindowTitle(f"ROS 2 Jazzy - Launcher de simulación (v{CURRENT_VERSION}) | Sistemas de Navegación")
         self.resize(1020, 680)
         self.setMinimumSize(880, 520)
 
@@ -278,6 +283,18 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.autoscroll_enabled = True
         self.ansi_parser = AnsiColorParser()
         self.latest_update_info: Optional[Dict] = None
+
+        # Control de estado de Docker Desktop
+        self._docker_running = False
+        self._is_starting_docker = False
+        self._docker_poll_timer: Optional[QtCore.QTimer] = None
+        self._docker_poll_count = 0
+
+        # Conexiones de señales Qt entre hilos
+        self.sig_manual_update_result.connect(self._on_manual_update_result)
+        self.sig_docker_status.connect(self._apply_docker_status)
+        self.sig_docker_ready.connect(self._on_docker_ready)
+        self.sig_docker_failed.connect(self._on_docker_start_failed)
 
         self._setup_window_icon()
         self._apply_global_styles()
@@ -299,7 +316,10 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             logger.warning("No se pudo configurar el icono de la ventana: %s", e)
 
     def _apply_global_styles(self):
-        self.setStyleSheet("""
+        arrow_path = get_dropdown_arrow_path()
+        arrow_url = arrow_path.as_posix() if arrow_path else ""
+
+        css = """
             QMainWindow {
                 background-color: #f8fafc;
                 font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
@@ -358,7 +378,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 color: #0f172a;
             }
             /* Inputs */
-            QLineEdit, QComboBox {
+            QLineEdit {
                 background-color: #ffffff;
                 border: 1px solid #cbd5e1;
                 border-radius: 6px;
@@ -366,12 +386,53 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 font-size: 12px;
                 color: #1e293b;
             }
-            QLineEdit:focus, QComboBox:focus {
+            QLineEdit:focus {
+                border: 1px solid #2563eb;
+            }
+            /* Dropdowns (QComboBox) con flecha visible y estilo profesional */
+            QComboBox {
+                background-color: #ffffff;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 6px 30px 6px 10px;
+                font-size: 12px;
+                color: #1e293b;
+                min-height: 20px;
+            }
+            QComboBox:hover {
+                border-color: #94a3b8;
+            }
+            QComboBox:focus, QComboBox:on {
                 border: 1px solid #2563eb;
             }
             QComboBox::drop-down {
-                border: none;
-                width: 20px;
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 26px;
+                border-left: 1px solid #e2e8f0;
+                border-top-right-radius: 5px;
+                border-bottom-right-radius: 5px;
+                background-color: #f8fafc;
+            }
+            QComboBox::drop-down:hover {
+                background-color: #e2e8f0;
+            }
+            QComboBox::down-arrow {
+                image: url("__DROPDOWN_ARROW_URL__");
+                width: 12px;
+                height: 12px;
+            }
+            QComboBox::down-arrow:disabled {
+                opacity: 0.3;
+            }
+            QComboBox QAbstractItemView {
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                background-color: #ffffff;
+                selection-background-color: #2563eb;
+                selection-color: #ffffff;
+                outline: 0;
+                padding: 4px;
             }
             /* Buttons */
             QPushButton {
@@ -394,13 +455,13 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 color: #94a3b8;
                 border-color: #f1f5f9;
             }
-            /* Action Buttons Specific */
+            /* Action Buttons Specific - Mismo tamaño y altura uniforme */
             #btnLaunch {
                 background-color: #2563eb;
                 color: #ffffff;
                 border: none;
                 font-weight: 700;
-                padding: 9px 18px;
+                padding: 9px 12px;
             }
             #btnLaunch:hover {
                 background-color: #1d4ed8;
@@ -410,7 +471,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 color: #ffffff;
                 border: none;
                 font-weight: 700;
-                padding: 9px 14px;
+                padding: 9px 12px;
             }
             #btnTerminal:hover {
                 background-color: #1e293b;
@@ -420,7 +481,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 color: #ffffff;
                 border: none;
                 font-weight: 700;
-                padding: 9px 14px;
+                padding: 9px 12px;
             }
             #btnWeb:hover {
                 background-color: #0369a1;
@@ -430,7 +491,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 color: #ffffff;
                 border: none;
                 font-weight: 700;
-                padding: 9px 14px;
+                padding: 9px 12px;
             }
             #btnStop:hover {
                 background-color: #b91c1c;
@@ -449,7 +510,9 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 background-color: #2563eb;
                 border-radius: 5px;
             }
-        """)
+        """
+        self.setStyleSheet(css.replace("__DROPDOWN_ARROW_URL__", arrow_url))
+
 
     def _build_ui(self):
         central = QtWidgets.QWidget()
@@ -480,44 +543,85 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         header.setObjectName("headerFrame")
         h_layout = QtWidgets.QHBoxLayout(header)
         h_layout.setContentsMargins(18, 8, 18, 8)
-        h_layout.setSpacing(12)
+        h_layout.setSpacing(10)
 
         left_box = QtWidgets.QVBoxLayout()
         left_box.setSpacing(1)
 
-        title = QtWidgets.QLabel(f"🤖 ROS 2 Jazzy - Launcher de Simulación  (v{CURRENT_VERSION})")
+        title = QtWidgets.QLabel(f"ROS 2 - Launcher de simulación  (v{CURRENT_VERSION})")
         title.setObjectName("titleLabel")
         left_box.addWidget(title)
 
-        sub = QtWidgets.QLabel("Sistemas de Navegación · Gazebo Sim & Navigation2 (Nav2)")
+        sub = QtWidgets.QLabel("Sistemas de Navegación")
         sub.setObjectName("subtitleLabel")
         left_box.addWidget(sub)
         h_layout.addLayout(left_box)
 
         h_layout.addStretch()
 
-        # Botón de versión / actualización
+        style = self.style()
+
+        # Botón de versión / actualización (mismo tamaño y altura que el de Docker)
         self.btn_header_update = QtWidgets.QPushButton(f"v{CURRENT_VERSION}")
+        self.btn_header_update.setIcon(get_themed_icon("system-software-update", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_ArrowUp))
+        self.btn_header_update.setIconSize(QtCore.QSize(16, 16))
         self.btn_header_update.clicked.connect(self._on_header_update_clicked)
-        self.btn_header_update.setStyleSheet("padding: 4px 10px; font-size: 11px;")
+        self.btn_header_update.setFixedHeight(30)
+        self.btn_header_update.setMinimumWidth(115)
+        self.btn_header_update.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        self.btn_header_update.setStyleSheet("""
+            QPushButton {
+                background-color: #f1f5f9;
+                color: #1e293b;
+                border: 1px solid #e2e8f0;
+                font-weight: 600;
+                font-size: 11px;
+                border-radius: 6px;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background-color: #e2e8f0;
+            }
+        """)
         h_layout.addWidget(self.btn_header_update)
 
-        # Badge de estado de Docker
+        # Badge de estado de Docker (misma altura y padding uniforme, sin emojis)
         self.lbl_docker_badge = QtWidgets.QLabel("● Comprobando Docker...")
+        self.lbl_docker_badge.setFixedHeight(30)
+        self.lbl_docker_badge.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.lbl_docker_badge.setStyleSheet("""
             background-color: #fef3c7;
             color: #b45309;
             font-size: 11px;
             font-weight: 700;
-            padding: 5px 10px;
+            padding: 0 12px;
             border-radius: 6px;
         """)
         h_layout.addWidget(self.lbl_docker_badge)
 
-        btn_docker_refresh = QtWidgets.QPushButton("🔄 Docker")
-        btn_docker_refresh.clicked.connect(self._check_docker_live_status)
-        btn_docker_refresh.setStyleSheet("padding: 4px 10px; font-size: 11px;")
-        h_layout.addWidget(btn_docker_refresh)
+        # Botón de Docker (mismo tamaño y altura que el de actualización, icono nativo moderno)
+        self.btn_docker = QtWidgets.QPushButton("Docker")
+        self.btn_docker.setIcon(get_themed_icon("view-refresh", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
+        self.btn_docker.setIconSize(QtCore.QSize(16, 16))
+        self.btn_docker.clicked.connect(self._on_docker_button_clicked)
+        self.btn_docker.setFixedHeight(30)
+        self.btn_docker.setMinimumWidth(115)
+        self.btn_docker.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        self.btn_docker.setStyleSheet("""
+            QPushButton {
+                background-color: #f1f5f9;
+                color: #1e293b;
+                border: 1px solid #e2e8f0;
+                font-weight: 600;
+                font-size: 11px;
+                border-radius: 6px;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background-color: #e2e8f0;
+            }
+        """)
+        h_layout.addWidget(self.btn_docker)
 
         parent_layout.addWidget(header)
 
@@ -531,28 +635,47 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.setSpacing(10)
 
-        self.btn_launch = QtWidgets.QPushButton("🚀  Iniciar Simulación")
+        style = self.style()
+
+        # Los 4 botones de acción tienen exactamente el mismo tamaño (proporción 1:1:1:1 y altura 40px)
+        self.btn_launch = QtWidgets.QPushButton("Iniciar simulación")
         self.btn_launch.setObjectName("btnLaunch")
+        self.btn_launch.setIcon(get_themed_icon("media-playback-start", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_MediaPlay))
+        self.btn_launch.setIconSize(QtCore.QSize(20, 20))
         self.btn_launch.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         self.btn_launch.clicked.connect(self._on_launch_simulation)
-        btn_row.addWidget(self.btn_launch, 2)
+        self.btn_launch.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        self.btn_launch.setFixedHeight(40)
+        btn_row.addWidget(self.btn_launch, 1)
 
-        self.btn_terminal = QtWidgets.QPushButton("💻  Abrir Terminal Docker")
+        self.btn_terminal = QtWidgets.QPushButton("Abrir terminal Docker")
         self.btn_terminal.setObjectName("btnTerminal")
+        self.btn_terminal.setIcon(get_themed_icon("utilities-terminal", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_ComputerIcon))
+        self.btn_terminal.setIconSize(QtCore.QSize(20, 20))
         self.btn_terminal.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         self.btn_terminal.clicked.connect(self._on_open_terminal)
+        self.btn_terminal.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        self.btn_terminal.setFixedHeight(40)
         btn_row.addWidget(self.btn_terminal, 1)
 
-        self.btn_web = QtWidgets.QPushButton("🌐  Interfaz Web (noVNC)")
+        self.btn_web = QtWidgets.QPushButton("Interfaz web (noVNC)")
         self.btn_web.setObjectName("btnWeb")
+        self.btn_web.setIcon(get_themed_icon("applications-internet", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_DesktopIcon))
+        self.btn_web.setIconSize(QtCore.QSize(20, 20))
         self.btn_web.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         self.btn_web.clicked.connect(self._open_web_gui)
+        self.btn_web.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        self.btn_web.setFixedHeight(40)
         btn_row.addWidget(self.btn_web, 1)
 
-        self.btn_stop = QtWidgets.QPushButton("🛑  Detener Contenedor")
+        self.btn_stop = QtWidgets.QPushButton("Detener contenedor")
         self.btn_stop.setObjectName("btnStop")
+        self.btn_stop.setIcon(get_themed_icon("media-playback-stop", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_MediaStop))
+        self.btn_stop.setIconSize(QtCore.QSize(20, 20))
         self.btn_stop.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         self.btn_stop.clicked.connect(self._on_stop_simulation)
+        self.btn_stop.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        self.btn_stop.setFixedHeight(40)
         btn_row.addWidget(self.btn_stop, 1)
 
         c_layout.addLayout(btn_row)
@@ -575,33 +698,55 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
     def _build_tabs(self, parent_layout: QtWidgets.QVBoxLayout):
         self.tab_widget = QtWidgets.QTabWidget()
+        self.tab_widget.setIconSize(QtCore.QSize(18, 18))
+        style = self.style()
+
+        self.tab_icon_keys = [
+            "document-properties",
+            "utilities-terminal",
+            "applications-development",
+            "applications-system",
+            "help-browser"
+        ]
 
         # 1. Configuración
         tab_config = QtWidgets.QWidget()
         self._build_config_tab(tab_config)
-        self.tab_widget.addTab(tab_config, "🚀  Configuración de Simulación")
+        self.tab_widget.addTab(tab_config, get_themed_icon("document-properties", color="#475569", selected_color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_FileDialogDetailedView), "Configuración de simulación")
 
         # 2. Logs
         tab_logs = QtWidgets.QWidget()
         self._build_logs_tab(tab_logs)
-        self.tab_widget.addTab(tab_logs, "📋  Salida y Logs")
+        self.tab_widget.addTab(tab_logs, get_themed_icon("utilities-terminal", color="#475569", selected_color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_FileDialogContentsView), "Salida y logs")
 
         # 3. Comandos Rápidos
         tab_quick = QtWidgets.QWidget()
         self._build_quick_tab(tab_quick)
-        self.tab_widget.addTab(tab_quick, "⚡  Comandos Rápidos")
+        self.tab_widget.addTab(tab_quick, get_themed_icon("applications-development", color="#475569", selected_color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_CommandLink), "Comandos rápidos")
 
         # 4. Ajustes Avanzados
         tab_advanced = QtWidgets.QWidget()
         self._build_advanced_tab(tab_advanced)
-        self.tab_widget.addTab(tab_advanced, "⚙️  Ajustes Avanzados")
+        self.tab_widget.addTab(tab_advanced, get_themed_icon("applications-system", color="#475569", selected_color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_FileDialogListView), "Ajustes avanzados")
 
         # 5. Guía del Estudiante
         tab_guide = QtWidgets.QWidget()
         self._build_guide_tab(tab_guide)
-        self.tab_widget.addTab(tab_guide, "📖  Guía del Estudiante")
+        self.tab_widget.addTab(tab_guide, get_themed_icon("help-browser", color="#475569", selected_color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_DialogHelpButton), "Guía del estudiante")
+
+        # Asegurar que la pestaña seleccionada (fondo azul) tenga icono blanco puro
+        self.tab_widget.currentChanged.connect(self._on_tab_changed)
+        self._on_tab_changed(self.tab_widget.currentIndex())
 
         parent_layout.addWidget(self.tab_widget, 1)
+
+    def _on_tab_changed(self, current_index: int):
+        """Tiñe de blanco el icono de la pestaña seleccionada y de gris las inactivas."""
+        for i, key in enumerate(self.tab_icon_keys):
+            if i == current_index:
+                self.tab_widget.setTabIcon(i, get_themed_icon(key, color="#ffffff"))
+            else:
+                self.tab_widget.setTabIcon(i, get_themed_icon(key, color="#475569"))
 
     def _build_config_tab(self, parent: QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(parent)
@@ -612,17 +757,14 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         ws_card = QtWidgets.QFrame()
         ws_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         ws_layout = QtWidgets.QVBoxLayout(ws_card)
-        ws_layout.setContentsMargins(14, 12, 14, 12)
-        ws_layout.setSpacing(8)
+        ws_layout.setContentsMargins(16, 14, 16, 14)
+        ws_layout.setSpacing(10)
 
         ws_head = QtWidgets.QHBoxLayout()
-        lbl_ws_title = QtWidgets.QLabel("📁 Espacio de Trabajo en Windows (Workspace)")
-        lbl_ws_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #1e293b;")
+        lbl_ws_title = QtWidgets.QLabel("Espacio de trabajo en Windows (workspace)")
+        lbl_ws_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #1e3a8a;")
         ws_head.addWidget(lbl_ws_title)
         ws_head.addStretch()
-        lbl_saved = QtWidgets.QLabel("✓ Guardado en AppData")
-        lbl_saved.setStyleSheet("font-size: 11px; color: #15803d; font-weight: 600;")
-        ws_head.addWidget(lbl_saved)
         ws_layout.addLayout(ws_head)
 
         ws_input_row = QtWidgets.QHBoxLayout()
@@ -630,7 +772,9 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.ent_ws_path.textChanged.connect(self._on_workspace_path_edited)
         ws_input_row.addWidget(self.ent_ws_path, 1)
 
-        btn_browse = QtWidgets.QPushButton("📂 Explorar...")
+        btn_browse = QtWidgets.QPushButton("Explorar...")
+        btn_browse.setIcon(get_themed_icon("document-open", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_DialogOpenButton))
+        btn_browse.setIconSize(QtCore.QSize(16, 16))
         btn_browse.clicked.connect(self._on_browse_workspace)
         ws_input_row.addWidget(btn_browse)
         ws_layout.addLayout(ws_input_row)
@@ -652,11 +796,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         param_card = QtWidgets.QFrame()
         param_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         p_layout = QtWidgets.QVBoxLayout(param_card)
-        p_layout.setContentsMargins(14, 12, 14, 12)
+        p_layout.setContentsMargins(16, 14, 16, 14)
         p_layout.setSpacing(10)
 
-        lbl_param_title = QtWidgets.QLabel("⚙️ Parámetros de Simulación y Navegación")
-        lbl_param_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #1e293b;")
+        lbl_param_title = QtWidgets.QLabel("Parámetros de simulación")
+        lbl_param_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #1e3a8a;")
         p_layout.addWidget(lbl_param_title)
 
         grid = QtWidgets.QGridLayout()
@@ -664,8 +808,9 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         grid.setVerticalSpacing(10)
 
         # Fila 0: Robot y Mundo
-        grid.addWidget(QtWidgets.QLabel("Modelo de Robot:"), 0, 0)
+        grid.addWidget(QtWidgets.QLabel("Modelo de robot:"), 0, 0)
         self.cbo_robot = QtWidgets.QComboBox()
+        self.cbo_robot.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         for r in get_all_robots():
             self.cbo_robot.addItem(r.name)
         self.cbo_robot.currentIndexChanged.connect(self._on_robot_changed)
@@ -673,12 +818,14 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         grid.addWidget(QtWidgets.QLabel("Mundo Gazebo:"), 0, 2)
         self.cbo_world = QtWidgets.QComboBox()
+        self.cbo_world.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         self.cbo_world.currentIndexChanged.connect(self._save_current_settings)
         grid.addWidget(self.cbo_world, 0, 3)
 
         # Fila 1: Escenario y ROS_DOMAIN_ID
         grid.addWidget(QtWidgets.QLabel("Escenario:"), 1, 0)
         self.cbo_scenario = QtWidgets.QComboBox()
+        self.cbo_scenario.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         self.cbo_scenario.currentIndexChanged.connect(self._on_scenario_changed)
         grid.addWidget(self.cbo_scenario, 1, 1)
 
@@ -724,11 +871,15 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         ctrl_bar.addStretch()
 
-        btn_scroll_bottom = QtWidgets.QPushButton("⬇ Ir al final")
+        btn_scroll_bottom = QtWidgets.QPushButton("Ir al final")
+        btn_scroll_bottom.setIcon(get_themed_icon("go-down", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_ArrowDown))
+        btn_scroll_bottom.setIconSize(QtCore.QSize(16, 16))
         btn_scroll_bottom.clicked.connect(self._scroll_to_bottom)
         ctrl_bar.addWidget(btn_scroll_bottom)
 
-        btn_clear = QtWidgets.QPushButton("🧹 Limpiar logs")
+        btn_clear = QtWidgets.QPushButton("Limpiar logs")
+        btn_clear.setIcon(get_themed_icon("edit-clear", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_DialogResetButton))
+        btn_clear.setIconSize(QtCore.QSize(16, 16))
         btn_clear.clicked.connect(self._clear_logs)
         ctrl_bar.addWidget(btn_clear)
 
@@ -756,41 +907,59 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(14)
 
-        lbl_intro = QtWidgets.QLabel("Ejecuta comandos de inspección y control directamente en el contenedor:")
-        lbl_intro.setStyleSheet("font-size: 12px; font-weight: 700; color: #1e293b;")
-        layout.addWidget(lbl_intro)
+        style = self.style()
+
+        # Tarjeta de Comandos de Inspección
+        cmd_card = QtWidgets.QFrame()
+        cmd_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        cmd_layout = QtWidgets.QVBoxLayout(cmd_card)
+        cmd_layout.setContentsMargins(16, 14, 16, 14)
+        cmd_layout.setSpacing(12)
+
+        lbl_intro = QtWidgets.QLabel("Comandos de inspección y control")
+        lbl_intro.setStyleSheet("font-size: 15px; font-weight: 700; color: #1e3a8a;")
+        cmd_layout.addWidget(lbl_intro)
 
         # Grid de botones rápidos
         grid = QtWidgets.QGridLayout()
         grid.setSpacing(10)
 
-        btn_topics = QtWidgets.QPushButton("📡 Listar Tópicos (ros2 topic list)")
+        btn_topics = QtWidgets.QPushButton("Listar topics (ros2 topic list)")
+        btn_topics.setIcon(get_themed_icon("emblem-documents", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        btn_topics.setIconSize(QtCore.QSize(16, 16))
         btn_topics.clicked.connect(lambda: self._execute_quick_command("ros2 topic list"))
         grid.addWidget(btn_topics, 0, 0)
 
-        btn_nodes = QtWidgets.QPushButton("🧩 Listar Nodos (ros2 node list)")
+        btn_nodes = QtWidgets.QPushButton("Listar nodos (ros2 node list)")
+        btn_nodes.setIcon(get_themed_icon("network-wired", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_FileDialogContentsView))
+        btn_nodes.setIconSize(QtCore.QSize(16, 16))
         btn_nodes.clicked.connect(lambda: self._execute_quick_command("ros2 node list"))
         grid.addWidget(btn_nodes, 0, 1)
 
-        btn_topics_info = QtWidgets.QPushButton("🔍 Tópicos con tipo (ros2 topic list -t)")
+        btn_topics_info = QtWidgets.QPushButton("Topics con tipo (ros2 topic list -t)")
+        btn_topics_info.setIcon(get_themed_icon("accessories-character-map", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_FileDialogInfoView))
+        btn_topics_info.setIconSize(QtCore.QSize(16, 16))
         btn_topics_info.clicked.connect(lambda: self._execute_quick_command("ros2 topic list -t"))
         grid.addWidget(btn_topics_info, 1, 0)
 
-        btn_compile = QtWidgets.QPushButton("🔨 Compilar Workspace (colcon build)")
+        btn_compile = QtWidgets.QPushButton("Compilar workspace (colcon build)")
+        btn_compile.setIcon(get_themed_icon("applications-development", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_CommandLink))
+        btn_compile.setIconSize(QtCore.QSize(16, 16))
         btn_compile.clicked.connect(self._on_compile_workspace)
         grid.addWidget(btn_compile, 1, 1)
 
-        layout.addLayout(grid)
+        cmd_layout.addLayout(grid)
+        layout.addWidget(cmd_card)
 
-        # Entrada para comando personalizado
+        # Tarjeta para comando personalizado
         custom_card = QtWidgets.QFrame()
         custom_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         c_layout = QtWidgets.QVBoxLayout(custom_card)
-        c_layout.setContentsMargins(14, 12, 14, 12)
-        c_layout.setSpacing(8)
+        c_layout.setContentsMargins(16, 14, 16, 14)
+        c_layout.setSpacing(10)
 
-        lbl_custom = QtWidgets.QLabel("Comando ROS 2 Personalizado:")
-        lbl_custom.setStyleSheet("font-size: 12px; font-weight: 700; color: #334155;")
+        lbl_custom = QtWidgets.QLabel("Comando ROS 2 personalizado")
+        lbl_custom.setStyleSheet("font-size: 15px; font-weight: 700; color: #1e3a8a;")
         c_layout.addWidget(lbl_custom)
 
         custom_row = QtWidgets.QHBoxLayout()
@@ -798,13 +967,15 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.ent_custom_cmd.returnPressed.connect(self._on_run_custom_command)
         custom_row.addWidget(self.ent_custom_cmd, 1)
 
-        btn_run_custom = QtWidgets.QPushButton("▶ Ejecutar")
-        btn_run_custom.setStyleSheet("background-color: #2563eb; color: #ffffff; font-weight: 700;")
+        btn_run_custom = QtWidgets.QPushButton("Ejecutar")
+        btn_run_custom.setIcon(get_themed_icon("media-playback-start", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_MediaPlay))
+        btn_run_custom.setIconSize(QtCore.QSize(16, 16))
+        btn_run_custom.setStyleSheet("background-color: #2563eb; color: #ffffff; font-weight: 700; padding: 7px 14px;")
         btn_run_custom.clicked.connect(self._on_run_custom_command)
         custom_row.addWidget(btn_run_custom)
         c_layout.addLayout(custom_row)
 
-        lbl_custom_note = QtWidgets.QLabel("La salida del comando se imprimirá en directo en la pestaña 'Salida y Logs'.")
+        lbl_custom_note = QtWidgets.QLabel("La salida del comando se imprimirá en directo en la pestaña 'Salida y logs'.")
         lbl_custom_note.setStyleSheet("font-size: 11px; font-style: italic; color: #64748b;")
         c_layout.addWidget(lbl_custom_note)
 
@@ -816,9 +987,22 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(14)
 
+        style = self.style()
+
+        # Tarjeta Ajustes de Red y Entorno
+        net_card = QtWidgets.QFrame()
+        net_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        n_layout = QtWidgets.QVBoxLayout(net_card)
+        n_layout.setContentsMargins(16, 14, 16, 14)
+        n_layout.setSpacing(10)
+
+        lbl_net_title = QtWidgets.QLabel("Ajustes de red y entorno")
+        lbl_net_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #1e3a8a;")
+        n_layout.addWidget(lbl_net_title)
+
         # Fila Puerto Web noVNC
         row_port = QtWidgets.QHBoxLayout()
-        lbl_port = QtWidgets.QLabel("Puerto Servidor Web noVNC:")
+        lbl_port = QtWidgets.QLabel("Puerto servidor noVNC:")
         lbl_port.setFixedWidth(210)
         row_port.addWidget(lbl_port)
         self.ent_web_port = QtWidgets.QLineEdit()
@@ -829,7 +1013,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         lbl_port_note.setStyleSheet("font-size: 11px; font-style: italic; color: #64748b;")
         row_port.addWidget(lbl_port_note)
         row_port.addStretch()
-        layout.addLayout(row_port)
+        n_layout.addLayout(row_port)
 
         # Fila Argumentos Extra
         row_args = QtWidgets.QHBoxLayout()
@@ -839,30 +1023,36 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.ent_extra_args = QtWidgets.QLineEdit()
         self.ent_extra_args.textChanged.connect(self._save_current_settings)
         row_args.addWidget(self.ent_extra_args, 1)
-        layout.addLayout(row_args)
+        n_layout.addLayout(row_args)
 
         # Checkbox recompilación
         self.chk_force_rebuild = QtWidgets.QCheckBox("Forzar recompilación completa con colcon en cada inicio de simulación")
         self.chk_force_rebuild.stateChanged.connect(self._save_current_settings)
-        layout.addWidget(self.chk_force_rebuild)
+        n_layout.addWidget(self.chk_force_rebuild)
+
+        layout.addWidget(net_card)
 
         # Tarjeta Mantenimiento Docker
         maint_card = QtWidgets.QFrame()
         maint_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         m_layout = QtWidgets.QVBoxLayout(maint_card)
-        m_layout.setContentsMargins(14, 12, 14, 12)
+        m_layout.setContentsMargins(16, 14, 16, 14)
         m_layout.setSpacing(10)
 
-        lbl_maint = QtWidgets.QLabel("Mantenimiento de Docker y Caché:")
-        lbl_maint.setStyleSheet("font-size: 12px; font-weight: 700; color: #334155;")
+        lbl_maint = QtWidgets.QLabel("Mantenimiento de Docker y caché")
+        lbl_maint.setStyleSheet("font-size: 15px; font-weight: 700; color: #1e3a8a;")
         m_layout.addWidget(lbl_maint)
 
         maint_row = QtWidgets.QHBoxLayout()
-        self.btn_prep_image = QtWidgets.QPushButton("📦 Reconstruir / Preparar Imagen Docker")
+        self.btn_prep_image = QtWidgets.QPushButton("Reconstruir / preparar imagen Docker")
+        self.btn_prep_image.setIcon(get_themed_icon("view-refresh", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
+        self.btn_prep_image.setIconSize(QtCore.QSize(16, 16))
         self.btn_prep_image.clicked.connect(self._on_pull_or_build_image)
         maint_row.addWidget(self.btn_prep_image)
 
-        btn_clean_cache = QtWidgets.QPushButton("🧹 Limpiar Volúmenes de Caché")
+        btn_clean_cache = QtWidgets.QPushButton("Limpiar volúmenes de caché")
+        btn_clean_cache.setIcon(get_themed_icon("user-trash", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_TrashIcon))
+        btn_clean_cache.setIconSize(QtCore.QSize(16, 16))
         btn_clean_cache.clicked.connect(self._on_clean_build_cache)
         maint_row.addWidget(btn_clean_cache)
         maint_row.addStretch()
@@ -874,11 +1064,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         upd_card = QtWidgets.QFrame()
         upd_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         u_layout = QtWidgets.QVBoxLayout(upd_card)
-        u_layout.setContentsMargins(14, 12, 14, 12)
+        u_layout.setContentsMargins(16, 14, 16, 14)
         u_layout.setSpacing(10)
 
-        lbl_upd = QtWidgets.QLabel("Actualizaciones del Software (GitHub):")
-        lbl_upd.setStyleSheet("font-size: 12px; font-weight: 700; color: #334155;")
+        lbl_upd = QtWidgets.QLabel("Actualizaciones del software")
+        lbl_upd.setStyleSheet("font-size: 15px; font-weight: 700; color: #1e3a8a;")
         u_layout.addWidget(lbl_upd)
 
         upd_row = QtWidgets.QHBoxLayout()
@@ -886,7 +1076,9 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         lbl_inst.setStyleSheet("font-weight: 600;")
         upd_row.addWidget(lbl_inst)
 
-        self.btn_check_updates = QtWidgets.QPushButton("🔄 Comprobar actualizaciones")
+        self.btn_check_updates = QtWidgets.QPushButton("Comprobar actualizaciones")
+        self.btn_check_updates.setIcon(get_themed_icon("system-software-update", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
+        self.btn_check_updates.setIconSize(QtCore.QSize(16, 16))
         self.btn_check_updates.clicked.connect(self._on_manual_check_updates)
         upd_row.addWidget(self.btn_check_updates)
 
@@ -1006,13 +1198,13 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         is_valid, msg = ConfigStore.validate_workspace(path_str)
         if is_valid:
             if "detectado" in msg:
-                self.lbl_ws_status.setText(f"✓ {msg}")
+                self.lbl_ws_status.setText(f"[OK] {msg}")
                 self.lbl_ws_status.setStyleSheet("font-size: 11px; color: #15803d; font-weight: 600;")
             else:
-                self.lbl_ws_status.setText(f"✓ {msg}")
+                self.lbl_ws_status.setText(f"[OK] {msg}")
                 self.lbl_ws_status.setStyleSheet("font-size: 11px; color: #1e293b;")
         else:
-            self.lbl_ws_status.setText(f"⚠ {msg}")
+            self.lbl_ws_status.setText(f"[Aviso] {msg}")
             self.lbl_ws_status.setStyleSheet("font-size: 11px; color: #dc2626; font-weight: 600;")
 
     def _on_robot_changed(self):
@@ -1045,54 +1237,201 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             scenario_name = self.cbo_scenario.currentText()
             sc_obj = robot_profile.get_scenario_by_name(scenario_name)
             if sc_obj:
-                self.lbl_scenario_desc.setText(f"ℹ {sc_obj.description}")
+                self.lbl_scenario_desc.setText(sc_obj.description)
             else:
                 self.lbl_scenario_desc.setText("")
         self._save_current_settings()
 
     def _check_docker_live_status(self):
+        if self._is_starting_docker:
+            return
+
         self.lbl_docker_badge.setText("● Comprobando Docker...")
         self.lbl_docker_badge.setStyleSheet("""
             background-color: #fef3c7; color: #b45309; font-size: 11px; font-weight: 700;
-            padding: 5px 10px; border-radius: 6px;
+            padding: 0 12px; border-radius: 6px;
         """)
 
         def _worker():
             installed, _ = DockerService.check_docker_installed()
             if not installed:
-                QtCore.QMetaObject.invokeMethod(
-                    self, "_set_docker_badge", QtCore.Qt.ConnectionType.QueuedConnection,
-                    QtCore.Q_ARG(str, "❌ Docker no encontrado"),
-                    QtCore.Q_ARG(str, "#fee2e2"),
-                    QtCore.Q_ARG(str, "#b91c1c")
-                )
+                self.sig_docker_status.emit(False, False, "")
                 return
-
             running, daemon_msg = DockerService.check_docker_running()
-            if running:
-                QtCore.QMetaObject.invokeMethod(
-                    self, "_set_docker_badge", QtCore.Qt.ConnectionType.QueuedConnection,
-                    QtCore.Q_ARG(str, f"● {daemon_msg}"),
-                    QtCore.Q_ARG(str, "#dcfce7"),
-                    QtCore.Q_ARG(str, "#15803d")
-                )
+            self.sig_docker_status.emit(True, running, daemon_msg)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    @QtCore.Slot(bool, bool, str)
+    def _apply_docker_status(self, installed: bool, running: bool, daemon_msg: str):
+        if self._is_starting_docker:
+            return
+
+        self._docker_running = running
+        style = self.style()
+
+        if not installed:
+            self.lbl_docker_badge.setText("● Docker no encontrado")
+            self.lbl_docker_badge.setStyleSheet("""
+                background-color: #fee2e2; color: #b91c1c; font-size: 11px; font-weight: 700;
+                padding: 0 12px; border-radius: 6px;
+            """)
+            self.btn_docker.setText("Instalar Docker")
+            self.btn_docker.setIcon(get_themed_icon("help-browser", color="#b91c1c", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_DialogHelpButton))
+            self.btn_docker.setToolTip("Docker no está instalado en este sistema. Clic para ver opciones de descarga.")
+            self.btn_docker.setStyleSheet("""
+                QPushButton {
+                    background-color: #fef2f2; color: #b91c1c; border: 1px solid #fecaca;
+                    font-weight: 600; font-size: 11px; border-radius: 6px; padding: 0 10px;
+                }
+                QPushButton:hover { background-color: #fee2e2; }
+            """)
+            self.btn_docker.setEnabled(True)
+        elif running:
+            self.lbl_docker_badge.setText(f"● {daemon_msg}")
+            self.lbl_docker_badge.setStyleSheet("""
+                background-color: #dcfce7; color: #15803d; font-size: 11px; font-weight: 700;
+                padding: 0 12px; border-radius: 6px;
+            """)
+            self.btn_docker.setText("Docker")
+            self.btn_docker.setIcon(get_themed_icon("view-refresh", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
+            self.btn_docker.setToolTip("Docker activo y funcionando. Clic para volver a comprobar el estado.")
+            self.btn_docker.setStyleSheet("""
+                QPushButton {
+                    background-color: #f1f5f9; color: #1e293b; border: 1px solid #e2e8f0;
+                    font-weight: 600; font-size: 11px; border-radius: 6px; padding: 0 10px;
+                }
+                QPushButton:hover { background-color: #e2e8f0; }
+            """)
+            self.btn_docker.setEnabled(True)
+        else:
+            self.lbl_docker_badge.setText("● Docker detenido")
+            self.lbl_docker_badge.setStyleSheet("""
+                background-color: #fef3c7; color: #b45309; font-size: 11px; font-weight: 700;
+                padding: 0 12px; border-radius: 6px;
+            """)
+            self.btn_docker.setText("Iniciar Docker")
+            self.btn_docker.setIcon(get_themed_icon("media-playback-start", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_MediaPlay))
+            self.btn_docker.setToolTip("Docker no está corriendo. Clic para arrancar Docker Desktop en Windows.")
+            self.btn_docker.setStyleSheet("""
+                QPushButton {
+                    background-color: #2563eb; color: #ffffff; border: 1px solid #1d4ed8;
+                    font-weight: 700; font-size: 11px; border-radius: 6px; padding: 0 10px;
+                }
+                QPushButton:hover { background-color: #1d4ed8; }
+            """)
+            self.btn_docker.setEnabled(True)
+
+    def _on_docker_button_clicked(self):
+        if self._is_starting_docker:
+            return
+
+        installed, _ = DockerService.check_docker_installed()
+        if not installed:
+            ans = QtWidgets.QMessageBox.question(
+                self,
+                "Docker no encontrado",
+                "Docker no se encuentra instalado en tu sistema.\n\n"
+                "¿Deseas abrir el navegador para descargar e instalar Docker Desktop?",
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+            )
+            if ans == QtWidgets.QMessageBox.StandardButton.Yes:
+                webbrowser.open("https://www.docker.com/products/docker-desktop/")
+            return
+
+        if self._docker_running:
+            self._check_docker_live_status()
+        else:
+            self._start_docker_desktop()
+
+    def _start_docker_desktop(self):
+        if self._is_starting_docker:
+            return
+
+        self._is_starting_docker = True
+        self.lbl_docker_badge.setText("● Arrancando Docker...")
+        self.lbl_docker_badge.setStyleSheet("""
+            background-color: #dbeafe; color: #1e40af; font-size: 11px; font-weight: 700;
+            padding: 0 12px; border-radius: 6px;
+        """)
+        self.btn_docker.setText("Arrancando...")
+        self.btn_docker.setIcon(get_themed_icon("process-working", color="#64748b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
+        self.btn_docker.setEnabled(False)
+        self.btn_docker.setStyleSheet("""
+            QPushButton {
+                background-color: #e2e8f0; color: #64748b; border: 1px solid #cbd5e1;
+                font-weight: 600; font-size: 11px; border-radius: 6px; padding: 0 10px;
+            }
+        """)
+
+        self._append_log("\n[Docker] Iniciando Docker Desktop en segundo plano...\nPor favor espera mientras el motor se inicializa.\n")
+        self.lbl_progress.setText("Arrancando Docker Desktop...")
+
+        def _worker():
+            ok, msg = DockerService.start_docker_desktop()
+            if not ok:
+                self.sig_docker_failed.emit(msg)
             else:
                 QtCore.QMetaObject.invokeMethod(
-                    self, "_set_docker_badge", QtCore.Qt.ConnectionType.QueuedConnection,
-                    QtCore.Q_ARG(str, "⚠️ Docker detenido"),
-                    QtCore.Q_ARG(str, "#fef3c7"),
-                    QtCore.Q_ARG(str, "#b45309")
+                    self, "_begin_docker_polling", QtCore.Qt.ConnectionType.QueuedConnection
                 )
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    @QtCore.Slot(str, str, str)
-    def _set_docker_badge(self, text: str, bg_color: str, fg_color: str):
-        self.lbl_docker_badge.setText(text)
-        self.lbl_docker_badge.setStyleSheet(f"""
-            background-color: {bg_color}; color: {fg_color}; font-size: 11px; font-weight: 700;
-            padding: 5px 10px; border-radius: 6px;
-        """)
+    @QtCore.Slot()
+    def _begin_docker_polling(self):
+        self._docker_poll_count = 0
+        if self._docker_poll_timer is None:
+            self._docker_poll_timer = QtCore.QTimer(self)
+            self._docker_poll_timer.timeout.connect(self._poll_docker_tick)
+        self._docker_poll_timer.start(2500)
+
+    def _poll_docker_tick(self):
+        self._docker_poll_count += 1
+
+        # Máximo 36 comprobaciones (~90 segundos)
+        if self._docker_poll_count > 36:
+            if self._docker_poll_timer:
+                self._docker_poll_timer.stop()
+            self._is_starting_docker = False
+            self._check_docker_live_status()
+            self.lbl_progress.setText("Tiempo límite de espera alcanzado")
+            self._append_log("[Docker] Tiempo límite de espera alcanzado. Docker Desktop puede seguir inicializándose en segundo plano.\n")
+            QtWidgets.QMessageBox.information(
+                self,
+                "Docker Desktop",
+                "Docker Desktop se ha iniciado, pero el motor tardó más de lo esperado en responder.\n\n"
+                "Comprueba la bandeja del sistema de Windows y pulsa 'Docker' una vez que esté listo."
+            )
+            return
+
+        def _worker():
+            running, daemon_msg = DockerService.check_docker_running()
+            if running:
+                self.sig_docker_ready.emit(daemon_msg)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    @QtCore.Slot(str)
+    def _on_docker_ready(self, daemon_msg: str):
+        if self._docker_poll_timer:
+            self._docker_poll_timer.stop()
+        self._is_starting_docker = False
+        self._docker_running = True
+        self._apply_docker_status(True, True, daemon_msg)
+        self.lbl_progress.setText("Docker Desktop listo")
+        self._append_log(f"[Docker] ¡Docker Desktop está listo y operativo! ({daemon_msg})\n")
+
+    @QtCore.Slot(str)
+    def _on_docker_start_failed(self, err_msg: str):
+        if self._docker_poll_timer:
+            self._docker_poll_timer.stop()
+        self._is_starting_docker = False
+        self._docker_running = False
+        self._check_docker_live_status()
+        self.lbl_progress.setText("Error al arrancar Docker")
+        self._append_log(f"[Error Docker] {err_msg}\n")
+        QtWidgets.QMessageBox.warning(self, "Arrancar Docker Desktop", err_msg)
 
     # --- Actualizaciones Automáticas ---
 
@@ -1119,10 +1458,14 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
     @QtCore.Slot(str)
     def _on_update_found_bg(self, ver: str):
-        self.btn_header_update.setText(f"✨ Actualizar a v{ver}")
+        self.btn_header_update.setText(f"Actualizar v{ver}")
+        self.btn_header_update.setIcon(get_themed_icon("system-software-update", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_ArrowUp))
         self.btn_header_update.setStyleSheet("""
-            background-color: #16a34a; color: #ffffff; font-weight: 700;
-            padding: 4px 10px; font-size: 11px; border-radius: 6px;
+            QPushButton {
+                background-color: #16a34a; color: #ffffff; font-weight: 700;
+                font-size: 11px; border-radius: 6px; padding: 0 10px; border: none;
+            }
+            QPushButton:hover { background-color: #15803d; }
         """)
         self.lbl_update_status.setText(f"Nueva versión v{ver} disponible")
         self.lbl_update_status.setStyleSheet("font-size: 11px; color: #16a34a; font-weight: 600;")
@@ -1141,12 +1484,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         def _worker():
             has_update, info, msg = check_for_updates(timeout=3.5)
-            QtCore.QMetaObject.invokeMethod(
-                self, "_on_manual_update_result", QtCore.Qt.ConnectionType.QueuedConnection,
-                QtCore.Q_ARG(bool, has_update),
-                QtCore.Q_ARG(object, info),
-                QtCore.Q_ARG(str, msg)
-            )
+            self.sig_manual_update_result.emit(has_update, info, msg)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -1156,10 +1494,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         if has_update and info:
             ver = info.get("version", "")
             self.latest_update_info = info
-            self.btn_header_update.setText(f"✨ Actualizar a v{ver}")
+            self.btn_header_update.setText(f"Actualizar v{ver}")
+            self.btn_header_update.setIcon(get_themed_icon("system-software-update", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_ArrowUp))
             self.btn_header_update.setStyleSheet("""
                 background-color: #16a34a; color: #ffffff; font-weight: 700;
-                padding: 4px 10px; font-size: 11px; border-radius: 6px;
+                padding: 0 10px; font-size: 11px; border-radius: 6px; border: none;
             """)
             self.lbl_update_status.setText(f"Nueva versión v{ver} disponible")
             self.lbl_update_status.setStyleSheet("font-size: 11px; color: #16a34a; font-weight: 600;")
@@ -1221,9 +1560,16 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
     def _launch_interactive_shell_container(self):
         image_name = COURSE_IMAGE_NAME
-        running, _ = DockerService.check_docker_running()
+        running, err = DockerService.check_docker_running()
         if not running:
-            QtWidgets.QMessageBox.critical(self, "Docker", "Docker Desktop no está en ejecución.")
+            ans = QtWidgets.QMessageBox.question(
+                self,
+                "Docker no está en ejecución",
+                f"Docker Desktop no está en ejecución:\n\n{err}\n\n¿Deseas arrancar Docker Desktop ahora?",
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+            )
+            if ans == QtWidgets.QMessageBox.StandardButton.Yes:
+                self._start_docker_desktop()
             return
 
         self.tab_widget.setCurrentIndex(1)  # Tab Logs
@@ -1263,11 +1609,14 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         image_name = COURSE_IMAGE_NAME
         running, err = DockerService.check_docker_running()
         if not running:
-            QtWidgets.QMessageBox.critical(
+            ans = QtWidgets.QMessageBox.question(
                 self,
-                "Error de Docker",
-                f"Docker no está en ejecución:\n\n{err}\n\nPor favor inicia Docker Desktop primero."
+                "Docker no está en ejecución",
+                f"Docker no está en ejecución:\n\n{err}\n\n¿Deseas arrancar Docker Desktop ahora?",
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
             )
+            if ans == QtWidgets.QMessageBox.StandardButton.Yes:
+                self._start_docker_desktop()
             return
 
         self._save_current_settings()
@@ -1409,10 +1758,10 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
     def _on_compile_finished(self, rc: int):
         if rc == 0:
-            self._append_log("\n✅ [Compilación exitosa]\n")
+            self._append_log("\n[Compilación exitosa]\n")
             QtWidgets.QMessageBox.information(self, "Compilación", "Workspace compilado correctamente.")
         else:
-            self._append_log(f"\n❌ [Compilación con errores (código {rc})]\n")
+            self._append_log(f"\n[Compilación con errores (código {rc})]\n")
             QtWidgets.QMessageBox.critical(self, "Compilación", f"La compilación terminó con código de error {rc}.")
 
     def _on_clean_build_cache(self):
@@ -1474,10 +1823,10 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.btn_prep_image.setEnabled(True)
         self._set_progress(100.0 if success else 0.0, "Listo" if success else "Error")
         if success:
-            self._append_log(f"\n✅ ÉXITO: {msg}\n")
+            self._append_log(f"\n[ÉXITO] {msg}\n")
             QtWidgets.QMessageBox.information(self, "Imagen", f"Imagen '{COURSE_IMAGE_NAME}' lista.")
         else:
-            self._append_log(f"\n❌ ERROR: {msg}\n")
+            self._append_log(f"\n[ERROR] {msg}\n")
             QtWidgets.QMessageBox.critical(self, "Error", f"Error al preparar imagen:\n{msg}")
 
     # --- Consola de Logs y Control de Auto-Scroll ---

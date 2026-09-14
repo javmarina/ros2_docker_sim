@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Tuple, Optional, Callable, Dict, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
+from embedded_icon import get_themed_icon
 
 # Configurar logger para este módulo
 logger = logging.getLogger("updater")
@@ -431,7 +432,7 @@ class UpdateModalDialog(QtWidgets.QDialog):
         head_layout = QtWidgets.QHBoxLayout(header_card)
         head_layout.setContentsMargins(14, 12, 14, 12)
 
-        badge_lbl = QtWidgets.QLabel(f"✨ Nueva versión: v{self.remote_version}")
+        badge_lbl = QtWidgets.QLabel(f"Nueva versión disponible: v{self.remote_version}")
         badge_lbl.setObjectName("badgeLabel")
         head_layout.addWidget(badge_lbl)
 
@@ -477,11 +478,15 @@ class UpdateModalDialog(QtWidgets.QDialog):
 
         self.btn_later = QtWidgets.QPushButton("Recordar más tarde")
         self.btn_later.setObjectName("btnLater")
+        self.btn_later.setIcon(get_themed_icon("window-close", color="#475569"))
+        self.btn_later.setIconSize(QtCore.QSize(18, 18))
         self.btn_later.clicked.connect(self.reject)
         btn_layout.addWidget(self.btn_later)
 
-        self.btn_update = QtWidgets.QPushButton("⬇ Actualizar y Reiniciar")
+        self.btn_update = QtWidgets.QPushButton("Actualizar y reiniciar")
         self.btn_update.setObjectName("btnUpdate")
+        self.btn_update.setIcon(get_themed_icon("system-software-update", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_ArrowDown))
+        self.btn_update.setIconSize(QtCore.QSize(18, 18))
         self.btn_update.clicked.connect(self._start_update)
         btn_layout.addWidget(self.btn_update)
 
@@ -587,7 +592,8 @@ class UpdateModalDialog(QtWidgets.QDialog):
             QtCore.QTimer.singleShot(1200, restart_application)
         else:
             self.btn_update.setEnabled(True)
-            self.btn_update.setText("⬇ Reintentar actualización")
+            self.btn_update.setText("Reintentar actualización")
+            self.btn_update.setIcon(get_themed_icon("view-refresh", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
             self.btn_later.setEnabled(True)
             QtWidgets.QMessageBox.critical(
                 self,
@@ -597,7 +603,8 @@ class UpdateModalDialog(QtWidgets.QDialog):
 
     def _start_update(self):
         self.btn_update.setEnabled(False)
-        self.btn_update.setText("⏳ Actualizando...")
+        self.btn_update.setText("Actualizando...")
+        self.btn_update.setIcon(get_themed_icon("view-refresh", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
         self.btn_later.setEnabled(False)
 
         signals = UpdateWorkerSignals()
