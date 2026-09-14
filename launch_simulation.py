@@ -151,7 +151,16 @@ Este entorno ejecuta **ROS 2 Jazzy**, **Gazebo Sim** y **Navigation2 (Nav2)** de
 
 ---
 
-### 4. Guía Rápida de Prácticas
+### 4. Modo Solo Contenedor (Modo Libre / Sin Simulación)
+- Si deseas desarrollar, compilar o ejecutar tus propios launch files y nodos sin la sobrecarga de una simulación completa de Gazebo o Nav2:
+  - Selecciona el escenario: **"Solo contenedor (sin procesos / modo libre)"**.
+  - Pulsa el botón **"Iniciar contenedor"**.
+  - El contenedor arrancará con el workspace montado en `/ros2_ws/src` y abrirá automáticamente una terminal interactiva nativa.
+  - El servidor gráfico noVNC permanece disponible en segundo plano: si ejecutas `rviz2` o cualquier herramienta GUI desde la consola, podrás interactuar con ella pulsando **"Interfaz web (noVNC)"**.
+
+---
+
+### 5. Guía Rápida de Prácticas
 
 #### A. Mapeo con SLAM Toolbox
 1. Selecciona el escenario: **"Gazebo Sim + SLAM Toolbox (Modo mapeo)"**.
@@ -166,6 +175,7 @@ Este entorno ejecuta **ROS 2 Jazzy**, **Gazebo Sim** y **Navigation2 (Nav2)** de
 3. En RViz2, fija la posición inicial estimada con la herramienta **"2D Pose Estimate"**.
 4. Envía metas de navegación pulsando **"Nav2 Goal"** en el mapa.
 """
+
 
 
 # --- Señales y Hilos de Soporte Qt ---
@@ -1142,6 +1152,8 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         # 4. Escenario
         saved_sc = self.config_store.get("scenario_id", "nav2")
+        if saved_sc == "bash":
+            saved_sc = "container_only"
         sc_obj = robot_profile.get_scenario_by_id(saved_sc)
         if sc_obj:
             idx_s = self.cbo_scenario.findText(sc_obj.name)
@@ -1166,6 +1178,8 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             sc_obj = robot_profile.get_scenario_by_name(selected_scenario_name)
             if sc_obj:
                 scenario_id = sc_obj.id
+            elif "solo contenedor" in selected_scenario_name.lower():
+                scenario_id = "container_only"
 
         data = {
             "workspace_path": self.ent_ws_path.text().strip(),
@@ -1239,14 +1253,40 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     def _on_scenario_changed(self):
         selected_robot_name = self.cbo_robot.currentText()
         robot_profile = get_robot_by_name(selected_robot_name)
+        scenario_id = "nav2"
         if robot_profile:
             scenario_name = self.cbo_scenario.currentText()
             sc_obj = robot_profile.get_scenario_by_name(scenario_name)
             if sc_obj:
+                scenario_id = sc_obj.id
                 self.lbl_scenario_desc.setText(sc_obj.description)
             else:
                 self.lbl_scenario_desc.setText("")
+
+        is_container_only = (
+            scenario_id in ("container_only", "bash")
+            or "solo contenedor" in self.cbo_scenario.currentText().lower()
+            or "modo libre" in self.cbo_scenario.currentText().lower()
+        )
+        is_base_robot = (robot_profile and robot_profile.id == "base")
+
+        if is_container_only:
+            self.btn_launch.setText("Iniciar contenedor")
+            self.btn_launch.setToolTip("Inicia el contenedor Docker con el workspace montado en modo libre (sin simulación ni roslaunch)")
+            self.cbo_world.setEnabled(False)
+            self.cbo_world.setToolTip("El mundo de simulación Gazebo no aplica en modo solo contenedor")
+            self.ent_extra_args.setEnabled(False)
+            self.ent_extra_args.setToolTip("Los argumentos extra no aplican en modo solo contenedor")
+        else:
+            self.btn_launch.setText("Iniciar simulación")
+            self.btn_launch.setToolTip("Inicia la simulación ROS 2 seleccionada")
+            self.cbo_world.setEnabled(not is_base_robot)
+            self.cbo_world.setToolTip("" if not is_base_robot else "No aplica para entorno base sin robot")
+            self.ent_extra_args.setEnabled(True)
+            self.ent_extra_args.setToolTip("")
+
         self._save_current_settings()
+
 
     def _check_docker_live_status(self):
         if self._is_starting_docker:
@@ -1558,59 +1598,17 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self,
             "Contenedor no iniciado",
             "El contenedor de simulación no está activo.\n\n"
-            "¿Deseas iniciar una sesión de contenedor ahora para abrir la terminal?",
+            "¿Deseas iniciar el contenedor en modo libre ahora para abrir la terminal?",
             QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
         )
         if answer == QtWidgets.QMessageBox.StandardButton.Yes:
             self._launch_interactive_shell_container()
 
     def _launch_interactive_shell_container(self):
-        image_name = COURSE_IMAGE_NAME
-        running, err = DockerService.check_docker_running()
-        if not running:
-            ans = QtWidgets.QMessageBox.question(
-                self,
-                "Docker no está en ejecución",
-                f"Docker Desktop no está en ejecución:\n\n{err}\n\n¿Deseas arrancar Docker Desktop ahora?",
-                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
-            )
-            if ans == QtWidgets.QMessageBox.StandardButton.Yes:
-                self._start_docker_desktop()
-            return
-
-        self.tab_widget.setCurrentIndex(1)  # Tab Logs
-        self._append_log("\nIniciando contenedor en modo terminal...\n")
-
-        ws_path = self.ent_ws_path.text().strip()
-        domain_id = self.ent_domain_id.text().strip() or "42"
-        web_port = self.ent_web_port.text().strip() or str(DEFAULT_NOVNC_PORT)
-
-        DockerService.stop_container(DEFAULT_CONTAINER_NAME)
-
-        docker_cmd = [
-            "docker", "run", "-d", "--rm",
-            "--name", DEFAULT_CONTAINER_NAME,
-            "-p", f"{web_port}:6080",
-            "-e", f"ROS_DOMAIN_ID={domain_id}",
-            "-e", "RCUTILS_COLORIZED_OUTPUT=1",
-            "-v", "ros2_jazzy_build_cache:/ros2_ws/build",
-            "-v", "ros2_jazzy_install_cache:/ros2_ws/install",
-            "-v", "ros2_jazzy_log_cache:/ros2_ws/log",
-        ]
-
-        if ws_path and os.path.exists(ws_path):
-            norm_path = Path(ws_path).resolve().as_posix()
-            docker_cmd.extend(["-v", f"{norm_path}:/ros2_ws/src:rw"])
-
-        docker_cmd.extend([image_name, "tail", "-f", "/dev/null"])
-
-        try:
-            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            subprocess.run(docker_cmd, check=True, creationflags=creationflags)
-            self._append_log("Contenedor iniciado con éxito en segundo plano.\n")
-            DockerService.open_container_terminal(DEFAULT_CONTAINER_NAME)
-        except Exception as e:
-            self._append_log(f"Error al iniciar contenedor: {e}\n")
+        idx = self.cbo_scenario.findText("Solo contenedor", QtCore.Qt.MatchFlag.MatchContains)
+        if idx >= 0:
+            self.cbo_scenario.setCurrentIndex(idx)
+        self._on_launch_simulation()
 
     def _on_launch_simulation(self):
         image_name = COURSE_IMAGE_NAME
@@ -1627,8 +1625,19 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             return
 
         self._save_current_settings()
+
+        selected_scenario_name = self.cbo_scenario.currentText()
+        is_container_only = (
+            "solo contenedor" in selected_scenario_name.lower()
+            or "modo libre" in selected_scenario_name.lower()
+        )
+
+        title_msg = (
+            "Iniciando contenedor ROS 2 (Modo Libre / Sin simulación)..."
+            if is_container_only else "Iniciando simulación de ROS 2..."
+        )
         self.tab_widget.setCurrentIndex(1)  # Tab Logs
-        self._append_log("\n" + "="*50 + "\nIniciando simulación de ROS 2...\n" + "="*50 + "\n")
+        self._append_log("\n" + "="*50 + f"\n{title_msg}\n" + "="*50 + "\n")
 
         def _worker():
             if not DockerService.is_image_available(image_name):
@@ -1641,9 +1650,9 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             selected_robot_name = self.cbo_robot.currentText()
             robot_profile = get_robot_by_name(selected_robot_name) or get_all_robots()[0]
 
-            selected_scenario_name = self.cbo_scenario.currentText()
-            scenario_obj = robot_profile.get_scenario_by_name(selected_scenario_name)
-            scenario_id = scenario_obj.id if scenario_obj else "nav2"
+            selected_sc_name = self.cbo_scenario.currentText()
+            scenario_obj = robot_profile.get_scenario_by_name(selected_sc_name)
+            scenario_id = scenario_obj.id if scenario_obj else ("container_only" if is_container_only else "nav2")
 
             world_name = self.cbo_world.currentText().strip() or "warehouse"
             extra_args = self.ent_extra_args.text().strip()
@@ -1670,12 +1679,17 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             )
 
             self._append_log(f"Comando Docker generado:\n{' '.join(docker_cmd)}\n\n")
-            QtCore.QTimer.singleShot(2500, self._open_web_gui)
+
+            if scenario_id in ("container_only", "bash"):
+                self._append_log("Abriendo terminal nativa conectada al contenedor...\n")
+                QtCore.QTimer.singleShot(1500, self._on_open_terminal)
+            else:
+                QtCore.QTimer.singleShot(2500, self._open_web_gui)
 
             self.active_sim_thread = ProcessRunnerThread(docker_cmd)
             self.active_sim_thread.signals.line_received.connect(self._append_log)
             self.active_sim_thread.signals.finished.connect(
-                lambda rc: self._append_log(f"\n[El proceso de simulación finalizó con código de salida {rc}]\n")
+                lambda rc: self._append_log(f"\n[El proceso finalizó con código de salida {rc}]\n")
             )
             self.active_sim_thread.signals.error.connect(
                 lambda err: self._append_log(f"\n[Error durante la ejecución: {err}]\n")
