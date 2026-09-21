@@ -1139,7 +1139,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self._update_workspace_validation()
 
         # 2. Robot
-        saved_robot_id = self.config_store.get("robot_id", "turtlebot4")
+        saved_robot_id = self.config_store.get("robot_id", "base")
         robot_profile = get_robot_by_id(saved_robot_id) or get_all_robots()[0]
         self.cbo_robot.setCurrentText(robot_profile.name)
         self._update_worlds_and_scenarios(robot_profile)
@@ -1151,7 +1151,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self.cbo_world.setCurrentIndex(idx_w)
 
         # 4. Escenario
-        saved_sc = self.config_store.get("scenario_id", "nav2")
+        saved_sc = self.config_store.get("scenario_id", "container_only")
         if saved_sc == "bash":
             saved_sc = "container_only"
         sc_obj = robot_profile.get_scenario_by_id(saved_sc)

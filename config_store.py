@@ -20,8 +20,8 @@ class ConfigStore:
     # Valores predeterminados seguros
     DEFAULTS: Dict[str, Any] = {
         "workspace_path": "",
-        "robot_id": "turtlebot4",
-        "scenario_id": "nav2",
+        "robot_id": "base",
+        "scenario_id": "container_only",
         "world_name": "warehouse",
         "ros_domain_id": "42",
         "web_port": "6080",
