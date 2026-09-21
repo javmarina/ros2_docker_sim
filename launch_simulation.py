@@ -8,6 +8,9 @@ import re
 import sys
 import logging
 import platform
+import datetime
+import traceback
+import urllib.parse
 import webbrowser
 import subprocess
 import threading
@@ -1940,11 +1943,343 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         event.accept()
 
 
+SUPPORT_EMAIL = "javier.marina@salle.url.edu"
+
+
+class ExceptionModalDialog(QtWidgets.QDialog):
+    """
+    Ventana modal moderna construida con PySide6 para capturar y mostrar cualquier
+    excepción no controlada, permitiendo copiar el informe técnico detallado
+    o enviárselo directamente por correo electrónico a soporte.
+    """
+
+    def __init__(self, exc_type, exc_value, exc_tb, parent: Optional[QtWidgets.QWidget] = None):
+        super().__init__(parent)
+        self.exc_type = exc_type
+        self.exc_value = exc_value
+        self.exc_tb = exc_tb
+
+        self.setWindowTitle("Error inesperado - ROS 2 Simulation Launcher")
+        self.setMinimumSize(620, 460)
+        self.resize(680, 500)
+        self.setModal(True)
+
+        # Configurar icono nativo
+        try:
+            ico_p = get_app_icon_path()
+            if ico_p and ico_p.is_file():
+                self.setWindowIcon(QtGui.QIcon(str(ico_p)))
+        except Exception:
+            pass
+
+        self.report_text = self._build_report()
+        self._build_ui()
+        self._apply_styles()
+
+    def _build_report(self) -> str:
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        tb_lines = "".join(traceback.format_exception(self.exc_type, self.exc_value, self.exc_tb))
+
+        try:
+            docker_inst = "Sí" if DockerService.is_docker_installed() else "No"
+            docker_run = "Sí" if DockerService.is_docker_running() else "No"
+            docker_info = f"Instalado: {docker_inst} | En ejecución: {docker_run}"
+        except Exception:
+            docker_info = "No disponible"
+
+        err_type_name = getattr(self.exc_type, "__name__", str(self.exc_type))
+
+        report = (
+            "============================================================\n"
+            "INFORME DE ERROR - ROS 2 SIMULATION LAUNCHER\n"
+            "============================================================\n"
+            f"Fecha y hora: {now_str}\n"
+            f"Versión Launcher: v{CURRENT_VERSION}\n"
+            f"Destinatario soporte: {SUPPORT_EMAIL}\n"
+            "\n"
+            "--- ENTORNO DEL SISTEMA ---\n"
+            f"Sistema Operativo: {platform.system()} {platform.release()} (Build {platform.version()})\n"
+            f"Arquitectura: {platform.machine()}\n"
+            f"Python: {platform.python_version()} ({platform.architecture()[0]})\n"
+            f"PySide6: {QtCore.qVersion()}\n"
+            f"Docker Desktop: {docker_info}\n"
+            "\n"
+            "--- EXCEPCIÓN DETECTADA ---\n"
+            f"Tipo: {err_type_name}\n"
+            f"Mensaje: {self.exc_value}\n"
+            "\n"
+            "--- TRAZA DE LA PILA (TRACEBACK) ---\n"
+            f"{tb_lines}\n"
+            "============================================================\n"
+        )
+        return report
+
+    def _build_ui(self):
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(12)
+
+        # 1. Cabecera con alerta
+        header_card = QtWidgets.QFrame()
+        header_card.setObjectName("headerCard")
+        head_layout = QtWidgets.QHBoxLayout(header_card)
+        head_layout.setContentsMargins(14, 12, 14, 12)
+
+        badge_lbl = QtWidgets.QLabel("Error Inesperado")
+        badge_lbl.setObjectName("badgeError")
+        head_layout.addWidget(badge_lbl)
+
+        err_name = getattr(self.exc_type, "__name__", "Excepción")
+        summary_msg = str(self.exc_value).strip().replace("\n", " ")
+        if len(summary_msg) > 75:
+            summary_msg = summary_msg[:72] + "..."
+        title_lbl = QtWidgets.QLabel(f"<b>{err_name}</b>: {summary_msg}")
+        title_lbl.setObjectName("titleLabel")
+        head_layout.addWidget(title_lbl, 1)
+
+        main_layout.addWidget(header_card)
+
+        # 2. Texto informativo con destinatario
+        lbl_info = QtWidgets.QLabel(
+            f"Se ha producido una excepción no controlada durante la ejecución. "
+            f"Puedes copiar el informe técnico con la traza completa y enviarlo por correo "
+            f"a <b><a style='color: #2563eb; text-decoration: none;' href='mailto:{SUPPORT_EMAIL}'>{SUPPORT_EMAIL}</a></b>"
+        )
+        lbl_info.setWordWrap(True)
+        lbl_info.setOpenExternalLinks(True)
+        lbl_info.setStyleSheet("font-size: 13px; color: #334155; line-height: 1.4;")
+        main_layout.addWidget(lbl_info)
+
+        # 3. Visor de la traza de error
+        self.txt_report = QtWidgets.QPlainTextEdit()
+        self.txt_report.setObjectName("reportBox")
+        self.txt_report.setReadOnly(True)
+        self.txt_report.setPlainText(self.report_text)
+        main_layout.addWidget(self.txt_report, 1)
+
+        # 4. Etiqueta de feedback para copia
+        self.lbl_feedback = QtWidgets.QLabel("")
+        self.lbl_feedback.setObjectName("feedbackLabel")
+        main_layout.addWidget(self.lbl_feedback)
+
+        # 5. Barra de botones
+        btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.setSpacing(10)
+
+        self.btn_copy = QtWidgets.QPushButton("Copiar informe de error")
+        self.btn_copy.setObjectName("btnCopy")
+        self.btn_copy.setIcon(get_themed_icon("emblem-documents", color="#ffffff"))
+        self.btn_copy.setIconSize(QtCore.QSize(18, 18))
+        self.btn_copy.clicked.connect(self._copy_to_clipboard)
+        btn_layout.addWidget(self.btn_copy)
+
+        self.btn_email = QtWidgets.QPushButton("Enviar por correo")
+        self.btn_email.setObjectName("btnEmail")
+        self.btn_email.setIcon(get_themed_icon("applications-internet", color="#1e293b"))
+        self.btn_email.setIconSize(QtCore.QSize(18, 18))
+        self.btn_email.clicked.connect(self._open_email_client)
+        btn_layout.addWidget(self.btn_email)
+
+        btn_layout.addStretch()
+
+        self.btn_close = QtWidgets.QPushButton("Cerrar aplicación")
+        self.btn_close.setObjectName("btnClose")
+        self.btn_close.setIcon(get_themed_icon("window-close", color="#475569"))
+        self.btn_close.setIconSize(QtCore.QSize(18, 18))
+        self.btn_close.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_close)
+
+        main_layout.addLayout(btn_layout)
+
+    def _apply_styles(self):
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #f8fafc;
+                font-family: 'Segoe UI', system-ui, sans-serif;
+            }
+            #headerCard {
+                background-color: #ffffff;
+                border: 1px solid #fee2e2;
+                border-radius: 8px;
+            }
+            #badgeError {
+                background-color: #fee2e2;
+                color: #b91c1c;
+                font-weight: 700;
+                font-size: 12px;
+                padding: 4px 10px;
+                border-radius: 6px;
+            }
+            #titleLabel {
+                color: #0f172a;
+                font-size: 13px;
+                margin-left: 8px;
+            }
+            #reportBox {
+                background-color: #0f172a;
+                color: #f1f5f9;
+                font-family: 'Consolas', 'Cascadia Code', 'Courier New', monospace;
+                font-size: 11px;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 8px;
+            }
+            #feedbackLabel {
+                font-size: 12px;
+                color: #16a34a;
+                font-weight: 600;
+                min-height: 16px;
+            }
+            #btnCopy {
+                background-color: #2563eb;
+                color: #ffffff;
+                font-weight: 600;
+                font-size: 13px;
+                padding: 7px 16px;
+                border-radius: 6px;
+                border: none;
+            }
+            #btnCopy:hover {
+                background-color: #1d4ed8;
+            }
+            #btnEmail {
+                background-color: #ffffff;
+                color: #0f172a;
+                font-weight: 600;
+                font-size: 13px;
+                padding: 7px 16px;
+                border-radius: 6px;
+                border: 1px solid #cbd5e1;
+            }
+            #btnEmail:hover {
+                background-color: #f1f5f9;
+            }
+            #btnClose {
+                background-color: transparent;
+                color: #475569;
+                font-weight: 600;
+                font-size: 13px;
+                padding: 7px 16px;
+                border-radius: 6px;
+                border: 1px solid #cbd5e1;
+            }
+            #btnClose:hover {
+                background-color: #fee2e2;
+                color: #b91c1c;
+                border-color: #fca5a5;
+            }
+        """)
+
+    def _copy_to_clipboard(self):
+        clipboard = QtWidgets.QApplication.clipboard()
+        if clipboard:
+            clipboard.setText(self.report_text)
+        self.btn_copy.setText("✓ ¡Informe copiado!")
+        self.lbl_feedback.setText(f"✓ ¡Informe copiado al portapapeles! Puedes pegarlo (Ctrl+V) en un correo a {SUPPORT_EMAIL}")
+        QtCore.QTimer.singleShot(3000, self._reset_copy_btn)
+
+    def _reset_copy_btn(self):
+        self.btn_copy.setText("Copiar informe de error")
+
+    def _open_email_client(self):
+        self._copy_to_clipboard()
+        err_name = getattr(self.exc_type, "__name__", "Excepción")
+        subject = f"[Error ROS 2 Launcher] {err_name}: {str(self.exc_value)[:50]}"
+        body = (
+            "Hola Javier,\n\n"
+            "Se ha producido la siguiente excepción en el Launcher de Simulación ROS 2:\n\n"
+            f"- Tipo: {err_name}\n"
+            f"- Mensaje: {self.exc_value}\n\n"
+            "(Nota: El informe técnico completo con la traza de la pila y entorno ya se ha copiado "
+            "automáticamente al portapapeles. Pégalo a continuación con Ctrl+V):\n\n"
+        )
+        mailto_url = f"mailto:{SUPPORT_EMAIL}?subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(mailto_url))
+        self.lbl_feedback.setText(f"Abriendo cliente de correo... Recuerda pegar el informe (Ctrl+V) antes de enviar.")
+
+
+class GlobalExceptionDispatcher(QtCore.QObject):
+    """
+    Despachador central de excepciones. Conecta excepciones procedentes de
+    cualquier hilo (hilo principal o hilos secundarios) con el hilo de la GUI
+    mediante una conexión de señales encolada segura (QueuedConnection).
+    """
+    sig_exception = QtCore.Signal(object, object, object)
+
+    def __init__(self):
+        super().__init__()
+        self._active = False
+        self.sig_exception.connect(self._on_exception, QtCore.Qt.ConnectionType.QueuedConnection)
+
+    @QtCore.Slot(object, object, object)
+    def _on_exception(self, exc_type, exc_value, exc_tb):
+        if self._active:
+            return  # Evitar ventanas recursivas o apiladas si hay un bucle de excepciones
+        self._active = True
+        try:
+            parent = QtWidgets.QApplication.activeWindow()
+            dlg = ExceptionModalDialog(exc_type, exc_value, exc_tb, parent=parent)
+            dlg.exec()
+        except Exception as err:
+            logger.critical("Error al mostrar la ventana modal de excepción: %s", err)
+        finally:
+            self._active = False
+            app = QtWidgets.QApplication.instance()
+            if app is not None:
+                app.closeAllWindows()
+                app.quit()
+
+
+_global_dispatcher: Optional[GlobalExceptionDispatcher] = None
+
+
+def _global_excepthook(exc_type, exc_value, exc_tb):
+    """Manejador global para sys.excepthook."""
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+
+    logger.critical("Excepción no controlada capturada:", exc_info=(exc_type, exc_value, exc_tb))
+
+    if _global_dispatcher is not None:
+        _global_dispatcher.sig_exception.emit(exc_type, exc_value, exc_tb)
+    else:
+        # Fallback previo a la inicialización del despachador
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            try:
+                app = QtWidgets.QApplication(sys.argv)
+            except Exception:
+                app = None
+        if app is not None:
+            try:
+                dlg = ExceptionModalDialog(exc_type, exc_value, exc_tb)
+                dlg.exec()
+                app.closeAllWindows()
+                app.quit()
+                return
+            except Exception:
+                pass
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+
+def _thread_excepthook(args):
+    """Manejador global para threading.excepthook (hilos secundarios en segundo plano)."""
+    _global_excepthook(args.exc_type, args.exc_value, args.exc_traceback)
+
+
 def main():
+    global _global_dispatcher
+
     # Inicializar aplicación Qt
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("ROS 2 Simulation Launcher")
     app.setOrganizationName("La Salle URL")
+
+    # Registrar despachador y capturadores globales de excepciones
+    _global_dispatcher = GlobalExceptionDispatcher()
+    sys.excepthook = _global_excepthook
+    threading.excepthook = _thread_excepthook
 
     # Configurar icono nativo de aplicación
     try:
@@ -1954,26 +2289,29 @@ def main():
     except Exception:
         pass
 
-    window = ModernSimulationLauncher()
-    window.show()
+    try:
+        window = ModernSimulationLauncher()
+        window.show()
 
-    # Garantizar que Windows Taskbar y Alt+Tab reciban el icono nativo (32x32)
-    if sys.platform == "win32" and ico_path and ico_path.is_file():
-        try:
-            import ctypes
-            hwnd = int(window.winId())
-            ico_str = str(ico_path)
-            # IMAGE_ICON = 1, LR_LOADFROMFILE = 0x10
-            hicon_big = ctypes.windll.user32.LoadImageW(None, ico_str, 1, 32, 32, 0x00000010)
-            hicon_small = ctypes.windll.user32.LoadImageW(None, ico_str, 1, 16, 16, 0x00000010)
-            if hicon_big:
-                ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 1, hicon_big)
-            if hicon_small:
-                ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 0, hicon_small)
-        except Exception as e:
-            logger.debug("No se pudo forzar WM_SETICON nativo: %s", e)
+        # Garantizar que Windows Taskbar y Alt+Tab reciban el icono nativo (32x32)
+        if sys.platform == "win32" and ico_path and ico_path.is_file():
+            try:
+                import ctypes
+                hwnd = int(window.winId())
+                ico_str = str(ico_path)
+                # IMAGE_ICON = 1, LR_LOADFROMFILE = 0x10
+                hicon_big = ctypes.windll.user32.LoadImageW(None, ico_str, 1, 32, 32, 0x00000010)
+                hicon_small = ctypes.windll.user32.LoadImageW(None, ico_str, 1, 16, 16, 0x00000010)
+                if hicon_big:
+                    ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 1, hicon_big)
+                if hicon_small:
+                    ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 0, hicon_small)
+            except Exception as e:
+                logger.debug("No se pudo forzar WM_SETICON nativo: %s", e)
 
-    sys.exit(app.exec())
+        sys.exit(app.exec())
+    except Exception:
+        _global_excepthook(*sys.exc_info())
 
 
 if __name__ == "__main__":
