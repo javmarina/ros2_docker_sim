@@ -379,7 +379,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
     sig_manual_update_result = QtCore.Signal(bool, object, str)
     sig_docker_status = QtCore.Signal(bool, bool, str)  # (installed, running, daemon_msg)
-    sig_docker_ready = QtCore.Signal(str)
+    sig_docker_ready = QtCore.Signal()
     sig_docker_failed = QtCore.Signal(str)
     sig_log_received = QtCore.Signal(str)
 
