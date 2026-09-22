@@ -48,9 +48,58 @@ class DockerService:
         except Exception:
             return "127.0.0.1"
 
-    @staticmethod
-    def check_docker_installed() -> Tuple[bool, str]:
+    @classmethod
+    def ensure_docker_in_path(cls) -> None:
+        """
+        Asegura que el ejecutable de docker esté disponible en PATH.
+        Si no se encuentra (habitual en instalaciones per-user sin admin en Windows
+        o consolas abiertas antes de la instalación), busca en las rutas estándar conocidas
+        y añade dinámicamente la carpeta 'resources/bin' a os.environ['PATH'].
+        """
+        if shutil.which("docker"):
+            return
+
+        host_os = cls.get_host_os()
+        if host_os == "windows":
+            candidates_bin = [
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "DockerDesktop" / "resources" / "bin",
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Docker" / "resources" / "bin",
+                Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Docker" / "Docker" / "resources" / "bin",
+                Path(r"C:\Program Files\Docker\Docker\resources\bin"),
+                Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Docker" / "Docker" / "resources" / "bin",
+                Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "DockerDesktop" / "resources" / "bin",
+            ]
+            for p in candidates_bin:
+                if (p / "docker.exe").is_file():
+                    logger.info("Auto-detectada ruta bin de Docker en Windows: %s. Añadiendo a PATH.", p)
+                    os.environ["PATH"] = f"{p}{os.pathsep}{os.environ.get('PATH', '')}"
+                    return
+
+            # Si encontramos Docker Desktop.exe mediante registro u otras rutas, probar su subcarpeta resources/bin
+            desktop_exe = cls.find_docker_desktop_path()
+            if desktop_exe:
+                fallback_bin = desktop_exe.parent / "resources" / "bin"
+                if (fallback_bin / "docker.exe").is_file():
+                    logger.info("Auto-detectada ruta bin de Docker desde Desktop.exe: %s. Añadiendo a PATH.", fallback_bin)
+                    os.environ["PATH"] = f"{fallback_bin}{os.pathsep}{os.environ.get('PATH', '')}"
+                    return
+
+        elif host_os == "mac":
+            mac_bins = [
+                Path("/usr/local/bin"),
+                Path("/opt/homebrew/bin"),
+                Path("/Applications/Docker.app/Contents/Resources/bin"),
+                Path.home() / ".docker" / "bin",
+            ]
+            for p in mac_bins:
+                if (p / "docker").is_file():
+                    os.environ["PATH"] = f"{p}:{os.environ.get('PATH', '')}"
+                    return
+
+    @classmethod
+    def check_docker_installed(cls) -> Tuple[bool, str]:
         """Comprueba si el binario de docker está instalado y en el PATH."""
+        cls.ensure_docker_in_path()
         try:
             res = subprocess.run(
                 ["docker", "--version"],
@@ -66,9 +115,10 @@ class DockerService:
         except FileNotFoundError:
             return False, "Docker no encontrado en el PATH del sistema."
 
-    @staticmethod
-    def check_docker_running() -> Tuple[bool, str]:
+    @classmethod
+    def check_docker_running(cls) -> Tuple[bool, str]:
         """Comprueba si el servicio/daemon de Docker está activo."""
+        cls.ensure_docker_in_path()
         try:
             res = subprocess.run(
                 ["docker", "info", "--format", "{{.ServerVersion}}"],
@@ -93,10 +143,11 @@ class DockerService:
         host_os = cls.get_host_os()
         if host_os == "windows":
             candidates = [
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "DockerDesktop" / "Docker Desktop.exe",
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Docker" / "Docker Desktop.exe",
                 Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Docker" / "Docker" / "Docker Desktop.exe",
                 Path(r"C:\Program Files\Docker\Docker\Docker Desktop.exe"),
                 Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Docker" / "Docker" / "Docker Desktop.exe",
-                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Docker" / "Docker Desktop.exe",
                 Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "DockerDesktop" / "Docker Desktop.exe",
             ]
             for p in candidates:
@@ -127,16 +178,20 @@ class DockerService:
         """Consulta directa en el registro de desinstalación de Windows."""
         try:
             import winreg
-            sub_key = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop"
-            for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
-                try:
-                    with winreg.OpenKey(root, sub_key) as k:
-                        loc, _ = winreg.QueryValueEx(k, "InstallLocation")
-                        cand = Path(loc) / "Docker Desktop.exe"
-                        if cand.is_file():
-                            return cand
-                except OSError:
-                    continue
+            sub_keys = [
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop",
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\DockerDesktop",
+            ]
+            for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                for sub_key in sub_keys:
+                    try:
+                        with winreg.OpenKey(root, sub_key) as k:
+                            loc, _ = winreg.QueryValueEx(k, "InstallLocation")
+                            cand = Path(loc) / "Docker Desktop.exe"
+                            if cand.is_file():
+                                return cand
+                    except OSError:
+                        continue
         except Exception:
             pass
         return None
@@ -549,3 +604,8 @@ class DockerService:
                 return False, f"La construcción finalizó con código {return_code}."
         except Exception as e:
             return False, str(e)
+
+
+# Inicialización: verificar e inyectar Docker en el PATH si está instalado en rutas estándar
+DockerService.ensure_docker_in_path()
+
