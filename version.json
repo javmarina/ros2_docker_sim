@@ -1,7 +1,7 @@
 {
-  "version": "1.13.0",
+  "version": "1.14.0",
   "release_date": "2026-09-22",
-  "changelog": "Corrección de errores",
+  "changelog": "Soporte modo oscuro y mejoras en la detección de Docker",
   "download_url": "https://github.com/javmarina/ros2_docker_sim/releases/latest/download/ros2_sim_launcher.exe",
   "archive_url": "https://github.com/javmarina/ros2_docker_sim/archive/refs/heads/main.zip"
 }
