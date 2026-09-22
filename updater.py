@@ -157,21 +157,25 @@ def fetch_remote_version(
 def check_for_updates(
     version_url: str = DEFAULT_VERSION_URL,
     timeout: float = 2.0,
-    local_ver: Optional[str] = None
+    local_ver: Optional[str] = None,
+    force: bool = False
 ) -> Tuple[bool, Optional[Dict[str, Any]], str]:
     """
     Función principal de comprobación:
     Retorna (hay_actualizacion_disponible, info_dict, mensaje)
     """
     active_local_ver = local_ver or get_local_version()
-    logger.info("Iniciando comprobación de actualizaciones (Versión local: v%s)", active_local_ver)
+    logger.info("Iniciando comprobación de actualizaciones (Versión local: v%s, forzado: %s)", active_local_ver, force)
     ok, data, msg = fetch_remote_version(version_url, timeout=timeout)
     if not ok or not data:
         return False, None, msg
 
     remote_ver = data.get("version", "")
-    if is_newer_version(remote_ver, active_local_ver):
-        msg = f"Nueva versión v{remote_ver} disponible (actual: v{active_local_ver})."
+    if force or is_newer_version(remote_ver, active_local_ver):
+        if force and not is_newer_version(remote_ver, active_local_ver):
+            msg = f"Reinstalación forzada: versión v{remote_ver} disponible (actual instalada: v{active_local_ver})."
+        else:
+            msg = f"Nueva versión v{remote_ver} disponible (actual: v{active_local_ver})."
         return True, data, msg
     else:
         msg = f"Ya tienes la última versión (v{active_local_ver})."
@@ -236,12 +240,13 @@ def _download_file(
 def download_and_apply_exe_update(
     download_url: str,
     progress_cb: Callable[[float, str], None],
-    fallback_repo: str = DEFAULT_GITHUB_REPO
+    fallback_repo: str = DEFAULT_GITHUB_REPO,
+    target_exe: Optional[Path] = None
 ) -> Tuple[bool, str]:
     """
-    Descarga el nuevo .exe de la versión y programa su sustitución al cerrar.
+    Descarga el nuevo .exe de la versión y programa su sustitución al cerrar con entorno saneado.
     """
-    current_exe = Path(sys.executable).resolve()
+    current_exe = (target_exe or Path(sys.executable)).resolve()
     temp_new_exe = Path(tempfile.gettempdir()) / f"ros2_sim_launcher_{os.getpid()}_new.exe"
 
     candidate_urls = []
@@ -285,6 +290,10 @@ try {{
         Wait-Process -Id $targetPid -Timeout 30 -ErrorAction SilentlyContinue
     }} catch {{}}
 
+    # Esperar tambien por cualquier proceso bootloader/hijo remanente asociado al mismo ejecutable
+    $exeName = [System.IO.Path]::GetFileNameWithoutExtension($targetExe)
+    Get-Process -Name $exeName -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq $targetExe }} | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+
     # Espera de seguridad para liberar descriptores de archivo del sistema y antivirus
     Start-Sleep -Milliseconds 1200
 
@@ -305,16 +314,26 @@ try {{
         }}
     }}
 
-    # 3. Si se reemplazo correctamente, lanzar la nueva version y limpiar
+    # 3. Si se reemplazo correctamente, limpiar variables de entorno y lanzar la nueva version
     if ($replaced -and (Test-Path -LiteralPath $targetExe)) {{
         Unblock-File -LiteralPath $targetExe -ErrorAction SilentlyContinue
         $workDir = Split-Path -Path $targetExe -Parent
         Log "Lanzando nueva version en $workDir : $targetExe"
-        $psi = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName = $targetExe
-        $psi.WorkingDirectory = $workDir
-        $psi.UseShellExecute = $true
-        [System.Diagnostics.Process]::Start($psi)
+
+        # Purgar variables heredadas de PyInstaller y PySide6 para evitar colisiones de DLLs y plugins temporales
+        Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
+        Remove-Item Env:QML2_IMPORT_PATH -ErrorAction SilentlyContinue
+        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+        Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+        Remove-Item Env:_MEIPASS2 -ErrorAction SilentlyContinue
+
+        # Limpiar cualquier ruta _MEI residual de PATH
+        if ($env:PATH) {{
+            $cleanDirs = $env:PATH -split ';' | Where-Object {{ $_ -and ($_ -notmatch '_MEI') }}
+            $env:PATH = ($cleanDirs -join ';')
+        }}
+
+        Start-Process -FilePath $targetExe -WorkingDirectory $workDir
         Start-Sleep -Milliseconds 600
         Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue
         Log "Actualizacion finalizada con exito."
@@ -328,6 +347,15 @@ try {{
 # Auto-eliminacion del script temporal
 Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
 """
+        # Preparar entorno saneado para el subproceso de Windows
+        clean_env = os.environ.copy()
+        for var in ["QT_PLUGIN_PATH", "QML2_IMPORT_PATH", "PYTHONPATH", "PYTHONHOME", "_MEIPASS2"]:
+            clean_env.pop(var, None)
+        if hasattr(sys, "_MEIPASS"):
+            mei_dir = str(sys._MEIPASS).lower()
+            dirs = clean_env.get("PATH", "").split(os.pathsep)
+            clean_env["PATH"] = os.pathsep.join(d for d in dirs if d.lower() != mei_dir and "_mei" not in d.lower())
+
         try:
             updater_ps1.write_text(ps_content, encoding="utf-8")
             progress_cb(100.0, "¡Actualización lista! Reiniciando launcher...")
@@ -352,7 +380,8 @@ Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction Silent
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                close_fds=True
+                close_fds=True,
+                env=clean_env
             )
             return True, "Reiniciando..."
         except Exception as e_ps:
@@ -385,7 +414,8 @@ del "%~f0" > nul
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    close_fds=True
+                    close_fds=True,
+                    env=clean_env
                 )
                 return True, "Reiniciando..."
             except Exception as e_bat:
@@ -529,16 +559,26 @@ class UpdateWorkerSignals(QtCore.QObject):
 class UpdateModalDialog(QtWidgets.QDialog):
     """Ventana modal moderna construida con PySide6 para informar y descargar actualizaciones."""
 
-    def __init__(self, parent: Optional[QtWidgets.QWidget], update_info: Dict[str, Any], target_dir: Path):
+    def __init__(
+        self,
+        parent: Optional[QtWidgets.QWidget],
+        update_info: Dict[str, Any],
+        target_dir: Path,
+        is_forced: bool = False
+    ):
         super().__init__(parent)
         self.update_info = update_info
         self.target_dir = target_dir
+        self.is_forced = is_forced
         self.download_url = update_info.get("download_url", "")
         self.remote_version = update_info.get("version", "desconocida")
         self.changelog = update_info.get("changelog", "Mejoras generales y corrección de errores.")
         self.release_date = update_info.get("release_date", "")
 
-        self.setWindowTitle("Actualización disponible - ROS 2 Launcher")
+        if self.is_forced:
+            self.setWindowTitle("Reinstalación forzada - ROS 2 Launcher")
+        else:
+            self.setWindowTitle("Actualización disponible - ROS 2 Launcher")
         self.setMinimumSize(560, 420)
         self.resize(580, 440)
         self.setModal(True)
@@ -566,7 +606,12 @@ class UpdateModalDialog(QtWidgets.QDialog):
         head_layout = QtWidgets.QHBoxLayout(header_card)
         head_layout.setContentsMargins(14, 12, 14, 12)
 
-        badge_lbl = QtWidgets.QLabel(f"Nueva versión disponible: v{self.remote_version}")
+        if self.is_forced:
+            badge_text = f"Forzar reinstalación: v{self.remote_version}"
+        else:
+            badge_text = f"Nueva versión disponible: v{self.remote_version}"
+
+        badge_lbl = QtWidgets.QLabel(badge_text)
         badge_lbl.setObjectName("badgeLabel")
         head_layout.addWidget(badge_lbl)
 
@@ -601,7 +646,14 @@ class UpdateModalDialog(QtWidgets.QDialog):
         self.prog_bar.setTextVisible(True)
         main_layout.addWidget(self.prog_bar)
 
-        self.lbl_status = QtWidgets.QLabel("¿Deseas descargar e instalar esta actualización ahora?")
+        if self.is_forced:
+            status_text = "¿Deseas descargar y forzar la reinstalación de esta versión ahora?"
+            btn_title = "Forzar actualización y reiniciar"
+        else:
+            status_text = "¿Deseas descargar e instalar esta actualización ahora?"
+            btn_title = "Actualizar y reiniciar"
+
+        self.lbl_status = QtWidgets.QLabel(status_text)
         self.lbl_status.setObjectName("statusLabel")
         main_layout.addWidget(self.lbl_status)
 
@@ -616,7 +668,7 @@ class UpdateModalDialog(QtWidgets.QDialog):
         self.btn_later.clicked.connect(self.reject)
         btn_layout.addWidget(self.btn_later)
 
-        self.btn_update = QtWidgets.QPushButton("Actualizar y reiniciar")
+        self.btn_update = QtWidgets.QPushButton(btn_title)
         self.btn_update.setObjectName("btnUpdate")
         self.btn_update.setIcon(get_themed_icon("system-software-update", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_ArrowDown))
         self.btn_update.setIconSize(QtCore.QSize(18, 18))
@@ -866,12 +918,26 @@ class UpdateModalDialog(QtWidgets.QDialog):
                     lambda pct, txt: signals.progress.emit(pct, txt)
                 )
             else:
-                # En modo script, extraer archivos al directorio de destino
-                ok, msg = download_and_extract_zip_update(
-                    self.download_url,
-                    self.target_dir,
-                    lambda pct, txt: signals.progress.emit(pct, txt)
-                )
+                # En modo script: si se está forzando actualización y existe un .exe local,
+                # permitimos probar la descarga y reemplazo del binario .exe
+                local_exe = self.target_dir / "dist" / "ros2_sim_launcher.exe"
+                if not local_exe.is_file():
+                    local_exe = self.target_dir / "ros2_sim_launcher.exe"
+
+                if self.is_forced and local_exe.is_file():
+                    logger.info("Modo script con ejecutable local detectado: probando reemplazo en %s", local_exe)
+                    ok, msg = download_and_apply_exe_update(
+                        self.download_url,
+                        lambda pct, txt: signals.progress.emit(pct, txt),
+                        target_exe=local_exe
+                    )
+                else:
+                    # En modo script habitual, extraer archivos al directorio de destino
+                    ok, msg = download_and_extract_zip_update(
+                        self.download_url,
+                        self.target_dir,
+                        lambda pct, txt: signals.progress.emit(pct, txt)
+                    )
             signals.finished.emit(ok, msg)
 
         threading.Thread(target=_worker, daemon=True).start()

@@ -423,8 +423,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         if hasattr(hints, "colorSchemeChanged"):
             hints.colorSchemeChanged.connect(self._on_color_scheme_changed)
 
-        # Comprobar actualizaciones en segundo plano a los 1.5s de arrancar
-        QtCore.QTimer.singleShot(1500, self._check_for_updates_background)
+        # Comprobar actualizaciones en segundo plano o forzadas al arrancar
+        if "--force-update" in sys.argv:
+            QtCore.QTimer.singleShot(1000, lambda: self._on_manual_check_updates(force=True))
+        else:
+            QtCore.QTimer.singleShot(1500, self._check_for_updates_background)
 
     def _setup_window_icon(self):
         try:
@@ -1688,9 +1691,9 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         else:
             self._on_manual_check_updates()
 
-    def _check_for_updates_background(self):
+    def _check_for_updates_background(self, force: bool = False):
         def _worker():
-            has_update, info, _ = check_for_updates(timeout=3.0)
+            has_update, info, _ = check_for_updates(timeout=3.0, force=force)
             if has_update and info:
                 ver = info.get("version", "")
                 self.latest_update_info = info
@@ -1718,17 +1721,17 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         if self.latest_update_info:
             self._prompt_update_available(self.latest_update_info)
 
-    def _prompt_update_available(self, update_info: dict):
+    def _prompt_update_available(self, update_info: dict, is_forced: bool = False):
         target_dir = Path(__file__).parent.resolve()
-        dialog = UpdateModalDialog(self, update_info, target_dir)
+        dialog = UpdateModalDialog(self, update_info, target_dir, is_forced=is_forced)
         dialog.exec()
 
-    def _on_manual_check_updates(self):
+    def _on_manual_check_updates(self, force: bool = False):
         self.btn_check_updates.setEnabled(False)
         self._style_status_label(self.lbl_update_status, "Buscando nueva versión en GitHub...", "info")
 
         def _worker():
-            has_update, info, msg = check_for_updates(timeout=3.5)
+            has_update, info, msg = check_for_updates(timeout=3.5, force=force)
             self.sig_manual_update_result.emit(has_update, info, msg)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -1739,14 +1742,18 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         if has_update and info:
             ver = info.get("version", "")
             self.latest_update_info = info
+            is_forced = ("--force-update" in sys.argv)
             self.btn_header_update.setText(f"Actualizar v{ver}")
             self.btn_header_update.setIcon(get_themed_icon("system-software-update", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_ArrowUp))
             self.btn_header_update.setStyleSheet("""
-                background-color: #16a34a; color: #ffffff; font-weight: 700;
-                padding: 0 10px; font-size: 11px; border-radius: 6px; border: none;
+                QPushButton {
+                    background-color: #16a34a; color: #ffffff; font-weight: 700;
+                    padding: 0 10px; font-size: 11px; border-radius: 6px; border: none;
+                }
+                QPushButton:hover { background-color: #15803d; }
             """)
             self._style_status_label(self.lbl_update_status, f"Nueva versión v{ver} disponible", "success")
-            self._prompt_update_available(info)
+            self._prompt_update_available(info, is_forced=is_forced)
         elif info:
             self.latest_update_info = None
             self._style_status_label(self.lbl_update_status, f"Al día (v{CURRENT_VERSION})", "success")
