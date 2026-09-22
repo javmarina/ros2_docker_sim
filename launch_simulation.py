@@ -59,6 +59,102 @@ from updater import (
 )
 from embedded_icon import get_app_icon_path, get_dropdown_arrow_path, get_themed_icon
 
+
+def set_window_dark_mode(hwnd: int, dark: bool):
+    """Activa o desactiva la barra de título oscura inmersiva de Windows 10/11 vía DWM."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        val = ctypes.c_int(1 if dark else 0)
+        # DWMWA_USE_IMMERSIVE_DARK_MODE: 20 en Windows 11 / Win10 20H1+, 19 en builds anteriores
+        res = ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(val), ctypes.sizeof(val))
+        if res != 0:
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(val), ctypes.sizeof(val))
+    except Exception as e:
+        logger.debug("No se pudo configurar DWM immersive dark mode: %s", e)
+
+
+def is_dark_mode() -> bool:
+    """Determina si el sistema operativo está actualmente en Modo Oscuro."""
+    app = QtWidgets.QApplication.instance()
+    if app:
+        hints = app.styleHints()
+        if hasattr(hints, "colorScheme"):
+            return hints.colorScheme() == QtCore.Qt.ColorScheme.Dark
+    return False
+
+
+THEME_PALETTES = {
+    "light": {
+        "bg_window": "#f8fafc",
+        "bg_header": "#ffffff",
+        "bg_card": "#ffffff",
+        "bg_input": "#ffffff",
+        "bg_button": "#f1f5f9",
+        "bg_button_hover": "#e2e8f0",
+        "bg_button_pressed": "#cbd5e1",
+        "border": "#e2e8f0",
+        "border_input": "#cbd5e1",
+        "border_input_hover": "#94a3b8",
+        "border_focus": "#2563eb",
+        "text_primary": "#0f172a",
+        "text_secondary": "#475569",
+        "text_muted": "#64748b",
+        "text_title": "#1e3a8a",
+        "icon_color": "#1e293b",
+        "tab_icon_normal": "#475569",
+        "tab_icon_selected": "#ffffff",
+        "card_desc_bg": "#f8fafc",
+        "card_desc_border": "#e2e8f0",
+        "tab_bg": "#f1f5f9",
+        "tab_text": "#475569",
+        "tab_hover": "#e2e8f0",
+        "tab_hover_text": "#0f172a",
+        "dropdown_bg": "#f8fafc",
+        "dropdown_hover": "#e2e8f0",
+        "progress_bg": "#ffffff",
+        "logs_border": "#cbd5e1",
+        "btn_terminal_bg": "#0f172a",
+        "btn_terminal_border": "transparent",
+        "btn_terminal_hover": "#1e293b",
+    },
+    "dark": {
+        "bg_window": "#0f172a",
+        "bg_header": "#1e293b",
+        "bg_card": "#1e293b",
+        "bg_input": "#0f172a",
+        "bg_button": "#334155",
+        "bg_button_hover": "#475569",
+        "bg_button_pressed": "#1e293b",
+        "border": "#334155",
+        "border_input": "#475569",
+        "border_input_hover": "#64748b",
+        "border_focus": "#3b82f6",
+        "text_primary": "#f8fafc",
+        "text_secondary": "#cbd5e1",
+        "text_muted": "#94a3b8",
+        "text_title": "#60a5fa",
+        "icon_color": "#e2e8f0",
+        "tab_icon_normal": "#94a3b8",
+        "tab_icon_selected": "#ffffff",
+        "card_desc_bg": "#0f172a",
+        "card_desc_border": "#334155",
+        "tab_bg": "#0f172a",
+        "tab_text": "#94a3b8",
+        "tab_hover": "#334155",
+        "tab_hover_text": "#f8fafc",
+        "dropdown_bg": "#0f172a",
+        "dropdown_hover": "#334155",
+        "progress_bg": "#0f172a",
+        "logs_border": "#334155",
+        "btn_terminal_bg": "#1e293b",
+        "btn_terminal_border": "#475569",
+        "btn_terminal_hover": "#334155",
+    }
+}
+
+
 # Dockerfile de respaldo en caso de que no exista en el directorio
 DOCKERFILE_CONTENT = r"""# Dockerfile for University Course on Navigation and ROS 2 Jazzy
 FROM osrf/ros:jazzy-desktop-full
@@ -315,11 +411,17 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.sig_docker_failed.connect(self._on_docker_start_failed)
         self.sig_log_received.connect(self._append_log_main_thread)
 
+        self._is_dark = self.is_dark_mode()
         self._setup_window_icon()
-        self._apply_global_styles()
         self._build_ui()
+        self._apply_theme(self._is_dark)
         self._load_saved_preferences()
         self._check_docker_live_status()
+
+        # Escuchar cambios de tema en Windows en tiempo real
+        hints = QtWidgets.QApplication.styleHints()
+        if hasattr(hints, "colorSchemeChanged"):
+            hints.colorSchemeChanged.connect(self._on_color_scheme_changed)
 
         # Comprobar actualizaciones en segundo plano a los 1.5s de arrancar
         QtCore.QTimer.singleShot(1500, self._check_for_updates_background)
@@ -334,203 +436,385 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         except Exception as e:
             logger.warning("No se pudo configurar el icono de la ventana: %s", e)
 
-    def _apply_global_styles(self):
-        arrow_path = get_dropdown_arrow_path()
+    def is_dark_mode(self) -> bool:
+        """Determina si el sistema operativo está actualmente en Modo Oscuro."""
+        return is_dark_mode()
+
+    @QtCore.Slot(QtCore.Qt.ColorScheme)
+    def _on_color_scheme_changed(self, scheme: QtCore.Qt.ColorScheme):
+        """Manejador del evento de cambio de tema nativo de Windows (Win10 / Win11)."""
+        is_dark = (scheme == QtCore.Qt.ColorScheme.Dark)
+        logger.info("Cambio de tema nativo del sistema detectado: %s", "Oscuro" if is_dark else "Claro")
+        self._apply_theme(is_dark)
+
+    def _apply_theme(self, is_dark: Optional[bool] = None):
+        """Aplica el tema visual (colores, estilos, barra de título e iconos)."""
+        if is_dark is None:
+            is_dark = self.is_dark_mode()
+        self._is_dark = is_dark
+        self._apply_global_styles(is_dark)
+        if sys.platform == "win32":
+            set_window_dark_mode(int(self.winId()), is_dark)
+        self._refresh_icons(is_dark)
+        self._update_workspace_validation()
+        self._refresh_docker_badge_style()
+
+    def _style_badge(self, label: QtWidgets.QLabel, text: str, kind: str):
+        """Aplica estilo consistente a los badges según el tema activo (light/dark)."""
+        label.setText(text)
+        is_dark = getattr(self, "_is_dark", False)
+        if kind == "success":
+            bg = "rgba(34, 197, 94, 0.2)" if is_dark else "#dcfce7"
+            fg = "#4ade80" if is_dark else "#15803d"
+        elif kind == "warning":
+            bg = "rgba(245, 158, 11, 0.2)" if is_dark else "#fef3c7"
+            fg = "#fbbf24" if is_dark else "#b45309"
+        elif kind == "error":
+            bg = "rgba(239, 68, 68, 0.2)" if is_dark else "#fee2e2"
+            fg = "#f87171" if is_dark else "#b91c1c"
+        else:
+            bg = "rgba(148, 163, 184, 0.2)" if is_dark else "#f1f5f9"
+            fg = "#cbd5e1" if is_dark else "#475569"
+
+        label.setStyleSheet(f"""
+            background-color: {bg};
+            color: {fg};
+            font-size: 11px;
+            font-weight: 700;
+            padding: 0 12px;
+            border-radius: 6px;
+        """)
+
+    def _style_status_label(self, label: QtWidgets.QLabel, text: str, kind: str):
+        """Aplica color accesible a las etiquetas de estado según el tema activo."""
+        label.setText(text)
+        is_dark = getattr(self, "_is_dark", False)
+        if kind == "success":
+            fg = "#4ade80" if is_dark else "#15803d"
+            weight = "600"
+        elif kind == "warning":
+            fg = "#fbbf24" if is_dark else "#b45309"
+            weight = "600"
+        elif kind == "error":
+            fg = "#f87171" if is_dark else "#dc2626"
+            weight = "600"
+        else:
+            fg = "#94a3b8" if is_dark else "#64748b"
+            weight = "normal"
+        label.setStyleSheet(f"font-size: 11px; color: {fg}; font-weight: {weight};")
+
+    def _refresh_docker_badge_style(self):
+        """Refresca el estado actual del badge de docker con los colores del tema activo."""
+        if hasattr(self, "_last_docker_status"):
+            installed, running, daemon_msg = self._last_docker_status
+            self._apply_docker_status(installed, running, daemon_msg)
+
+    def _refresh_icons(self, is_dark: bool):
+        """Actualiza los iconos vectoriales de la interfaz con el tinte del tema activo."""
+        p = THEME_PALETTES["dark" if is_dark else "light"]
+        col = p["icon_color"]
+
+        # Botones de cabecera
+        if hasattr(self, "btn_header_update") and not self.latest_update_info:
+            self.btn_header_update.setIcon(get_themed_icon("system-software-update", color=col, fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_ArrowUp))
+        if hasattr(self, "btn_docker"):
+            if getattr(self, "_docker_running", False):
+                self.btn_docker.setIcon(get_themed_icon("view-refresh", color=col, fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
+
+        # Botones de herramientas en pestañas
+        btn_icon_map = [
+            ("btn_browse", "document-open", QtWidgets.QStyle.StandardPixmap.SP_DialogOpenButton),
+            ("btn_scroll_bottom", "go-down", QtWidgets.QStyle.StandardPixmap.SP_ArrowDown),
+            ("btn_clear", "edit-clear", QtWidgets.QStyle.StandardPixmap.SP_DialogResetButton),
+            ("btn_topics", "emblem-documents", QtWidgets.QStyle.StandardPixmap.SP_FileDialogDetailedView),
+            ("btn_nodes", "network-wired", QtWidgets.QStyle.StandardPixmap.SP_FileDialogContentsView),
+            ("btn_topics_info", "accessories-character-map", QtWidgets.QStyle.StandardPixmap.SP_FileDialogInfoView),
+            ("btn_compile", "applications-development", QtWidgets.QStyle.StandardPixmap.SP_CommandLink),
+            ("btn_prep_image", "view-refresh", QtWidgets.QStyle.StandardPixmap.SP_BrowserReload),
+            ("btn_clean_cache", "user-trash", QtWidgets.QStyle.StandardPixmap.SP_TrashIcon),
+            ("btn_check_updates", "system-software-update", QtWidgets.QStyle.StandardPixmap.SP_BrowserReload),
+        ]
+        for attr, key, fallback in btn_icon_map:
+            if hasattr(self, attr):
+                btn = getattr(self, attr)
+                btn.setIcon(get_themed_icon(key, color=col, fallback_sp=fallback))
+
+        # Pestañas
+        if hasattr(self, "tab_widget"):
+            self._on_tab_changed(self.tab_widget.currentIndex())
+
+        # Guía
+        if hasattr(self, "txt_guide"):
+            self._update_guide_styles()
+
+    def _apply_global_styles(self, is_dark: bool = False):
+        palette_key = "dark" if is_dark else "light"
+        p = THEME_PALETTES[palette_key]
+        arrow_path = get_dropdown_arrow_path(dark_mode=is_dark)
         arrow_url = arrow_path.as_posix() if arrow_path else ""
 
-        css = """
-            QMainWindow {
-                background-color: #f8fafc;
+        css = f"""
+            QMainWindow {{
+                background-color: {p['bg_window']};
                 font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
-            }
-            QWidget {
+            }}
+            QWidget {{
                 font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
-                color: #0f172a;
-            }
+                color: {p['text_primary']};
+            }}
             /* Header */
-            #headerFrame {
-                background-color: #ffffff;
-                border-bottom: 1px solid #e2e8f0;
+            #headerFrame {{
+                background-color: {p['bg_header']};
+                border-bottom: 1px solid {p['border']};
                 padding: 10px 18px;
-            }
-            #titleLabel {
+            }}
+            #titleLabel {{
                 font-size: 15px;
                 font-weight: 700;
-                color: #1e3a8a;
-            }
-            #subtitleLabel {
+                color: {p['text_title']};
+            }}
+            #subtitleLabel {{
                 font-size: 11px;
-                color: #64748b;
-            }
-            /* Cards */
-            .QFrame[frameShape="1"] { /* StyledPanel */
-                background-color: #ffffff;
-                border: 1px solid #e2e8f0;
+                color: {p['text_muted']};
+            }}
+            /* Cards semánticas */
+            QFrame[card="true"] {{
+                background-color: {p['bg_card']};
+                border: 1px solid {p['border']};
                 border-radius: 8px;
-            }
+            }}
+            /* Títulos y textos semánticos dentro de tarjetas */
+            QLabel[heading="true"] {{
+                font-size: 15px;
+                font-weight: 700;
+                color: {p['text_title']};
+            }}
+            QLabel[heading_small="true"] {{
+                font-size: 12px;
+                font-weight: 600;
+                color: {p['text_primary']};
+            }}
+            QLabel[secondary="true"] {{
+                font-size: 11px;
+                color: {p['text_secondary']};
+            }}
+            QLabel[note="true"] {{
+                font-size: 11px;
+                font-style: italic;
+                color: {p['text_muted']};
+            }}
             /* Tab Widget */
-            QTabWidget::pane {
-                border: 1px solid #e2e8f0;
+            QTabWidget::pane {{
+                border: 1px solid {p['border']};
                 border-radius: 8px;
-                background-color: #ffffff;
+                background-color: {p['bg_window']};
                 top: -1px;
-            }
-            QTabBar::tab {
-                background: #f1f5f9;
-                color: #475569;
+            }}
+            QTabBar::tab {{
+                background: {p['tab_bg']};
+                color: {p['tab_text']};
                 padding: 8px 16px;
                 font-size: 12px;
                 font-weight: 600;
-                border: 1px solid #e2e8f0;
+                border: 1px solid {p['border']};
                 border-bottom: none;
                 border-top-left-radius: 6px;
                 border-top-right-radius: 6px;
                 margin-right: 4px;
-            }
-            QTabBar::tab:selected {
+            }}
+            QTabBar::tab:selected {{
                 background: #2563eb;
                 color: #ffffff;
                 border-color: #2563eb;
-            }
-            QTabBar::tab:hover:!selected {
-                background: #e2e8f0;
-                color: #0f172a;
-            }
+            }}
+            QTabBar::tab:hover:!selected {{
+                background: {p['tab_hover']};
+                color: {p['tab_hover_text']};
+            }}
             /* Inputs */
-            QLineEdit {
-                background-color: #ffffff;
-                border: 1px solid #cbd5e1;
+            QLineEdit {{
+                background-color: {p['bg_input']};
+                border: 1px solid {p['border_input']};
                 border-radius: 6px;
                 padding: 6px 10px;
                 font-size: 12px;
-                color: #1e293b;
-            }
-            QLineEdit:focus {
-                border: 1px solid #2563eb;
-            }
-            /* Dropdowns (QComboBox) con flecha visible y estilo profesional */
-            QComboBox {
-                background-color: #ffffff;
-                border: 1px solid #cbd5e1;
+                color: {p['text_primary']};
+            }}
+            QLineEdit:hover {{
+                border-color: {p['border_input_hover']};
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {p['border_focus']};
+            }}
+            /* Dropdowns (QComboBox) */
+            QComboBox {{
+                background-color: {p['bg_input']};
+                border: 1px solid {p['border_input']};
                 border-radius: 6px;
                 padding: 6px 30px 6px 10px;
                 font-size: 12px;
-                color: #1e293b;
+                color: {p['text_primary']};
                 min-height: 20px;
-            }
-            QComboBox:hover {
-                border-color: #94a3b8;
-            }
-            QComboBox:focus, QComboBox:on {
-                border: 1px solid #2563eb;
-            }
-            QComboBox::drop-down {
+            }}
+            QComboBox:hover {{
+                border-color: {p['border_input_hover']};
+            }}
+            QComboBox:focus, QComboBox:on {{
+                border: 1px solid {p['border_focus']};
+            }}
+            QComboBox::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
                 width: 26px;
-                border-left: 1px solid #e2e8f0;
+                border-left: 1px solid {p['border']};
                 border-top-right-radius: 5px;
                 border-bottom-right-radius: 5px;
-                background-color: #f8fafc;
-            }
-            QComboBox::drop-down:hover {
-                background-color: #e2e8f0;
-            }
-            QComboBox::down-arrow {
-                image: url("__DROPDOWN_ARROW_URL__");
+                background-color: {p['dropdown_bg']};
+            }}
+            QComboBox::drop-down:hover {{
+                background-color: {p['dropdown_hover']};
+            }}
+            QComboBox::down-arrow {{
+                image: url("{arrow_url}");
                 width: 12px;
                 height: 12px;
-            }
-            QComboBox::down-arrow:disabled {
+            }}
+            QComboBox::down-arrow:disabled {{
                 opacity: 0.3;
-            }
-            QComboBox QAbstractItemView {
-                border: 1px solid #cbd5e1;
+            }}
+            QComboBox QAbstractItemView {{
+                border: 1px solid {p['border_input']};
                 border-radius: 6px;
-                background-color: #ffffff;
+                background-color: {p['bg_card']};
+                color: {p['text_primary']};
                 selection-background-color: #2563eb;
                 selection-color: #ffffff;
                 outline: 0;
                 padding: 4px;
-            }
+            }}
             /* Buttons */
-            QPushButton {
-                background-color: #f1f5f9;
-                border: 1px solid #e2e8f0;
+            QPushButton {{
+                background-color: {p['bg_button']};
+                border: 1px solid {p['border']};
                 border-radius: 6px;
                 padding: 7px 14px;
                 font-size: 12px;
                 font-weight: 600;
-                color: #1e293b;
-            }
-            QPushButton:hover {
-                background-color: #e2e8f0;
-            }
-            QPushButton:pressed {
-                background-color: #cbd5e1;
-            }
-            QPushButton:disabled {
-                background-color: #f8fafc;
-                color: #94a3b8;
-                border-color: #f1f5f9;
-            }
-            /* Action Buttons Specific - Mismo tamaño y altura uniforme */
-            #btnLaunch {
+                color: {p['text_primary']};
+            }}
+            QPushButton:hover {{
+                background-color: {p['bg_button_hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {p['bg_button_pressed']};
+            }}
+            QPushButton:disabled {{
+                background-color: {p['bg_button']};
+                color: {p['text_muted']};
+                border-color: {p['border']};
+            }}
+            /* Header buttons */
+            #btnHeaderUpdate, #btnDocker {{
+                background-color: {p['bg_button']};
+                color: {p['text_primary']};
+                border: 1px solid {p['border']};
+                font-weight: 600;
+                font-size: 11px;
+                border-radius: 6px;
+                padding: 0 10px;
+            }}
+            #btnHeaderUpdate:hover, #btnDocker:hover {{
+                background-color: {p['bg_button_hover']};
+            }}
+            /* Action Buttons Specific */
+            #btnLaunch {{
                 background-color: #2563eb;
                 color: #ffffff;
                 border: none;
                 font-weight: 700;
                 padding: 9px 12px;
-            }
-            #btnLaunch:hover {
+            }}
+            #btnLaunch:hover {{
                 background-color: #1d4ed8;
-            }
-            #btnTerminal {
-                background-color: #0f172a;
+            }}
+            #btnTerminal {{
+                background-color: {p['btn_terminal_bg']};
                 color: #ffffff;
-                border: none;
+                border: 1px solid {p['btn_terminal_border']};
                 font-weight: 700;
                 padding: 9px 12px;
-            }
-            #btnTerminal:hover {
-                background-color: #1e293b;
-            }
-            #btnWeb {
+            }}
+            #btnTerminal:hover {{
+                background-color: {p['btn_terminal_hover']};
+            }}
+            #btnWeb {{
                 background-color: #0284c7;
                 color: #ffffff;
                 border: none;
                 font-weight: 700;
                 padding: 9px 12px;
-            }
-            #btnWeb:hover {
+            }}
+            #btnWeb:hover {{
                 background-color: #0369a1;
-            }
-            #btnStop {
+            }}
+            #btnStop {{
                 background-color: #dc2626;
                 color: #ffffff;
                 border: none;
                 font-weight: 700;
                 padding: 9px 12px;
-            }
-            #btnStop:hover {
+            }}
+            #btnStop:hover {{
                 background-color: #b91c1c;
-            }
+            }}
             /* Progress Bar */
-            QProgressBar {
-                border: 1px solid #e2e8f0;
+            QProgressBar {{
+                border: 1px solid {p['border_input']};
                 border-radius: 6px;
                 text-align: center;
-                background-color: #ffffff;
+                background-color: {p['progress_bg']};
+                color: {p['text_primary']};
                 height: 16px;
                 font-size: 10px;
                 font-weight: 600;
-            }
-            QProgressBar::chunk {
+            }}
+            QProgressBar::chunk {{
                 background-color: #2563eb;
                 border-radius: 5px;
-            }
+            }}
+            /* Scenario description box */
+            #scenarioDescFrame {{
+                background-color: {p['card_desc_bg']};
+                border: 1px solid {p['card_desc_border']};
+                border-radius: 6px;
+                padding: 8px 12px;
+            }}
+            #lblScenarioDesc {{
+                font-size: 11px;
+                font-style: italic;
+                color: {p['text_secondary']};
+            }}
+            /* Log box & Guide */
+            #txtLogs {{
+                background-color: #0f172a;
+                color: #e2e8f0;
+                font-family: 'Cascadia Code', 'Consolas', 'DejaVu Sans Mono', monospace;
+                font-size: 11px;
+                border: 1px solid {p['logs_border']};
+                border-radius: 6px;
+                padding: 8px;
+            }}
+            #txtGuide {{
+                background-color: {p['bg_card']};
+                color: {p['text_primary']};
+                border: 1px solid {p['border']};
+                border-radius: 6px;
+                padding: 16px;
+                font-size: 13px;
+                line-height: 1.5;
+            }}
         """
-        self.setStyleSheet(css.replace("__DROPDOWN_ARROW_URL__", arrow_url))
+        self.setStyleSheet(css)
 
 
     def _build_ui(self):
@@ -582,70 +866,36 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         # Botón de versión / actualización (mismo tamaño y altura que el de Docker)
         self.btn_header_update = QtWidgets.QPushButton(f"v{CURRENT_VERSION}")
-        self.btn_header_update.setIcon(get_themed_icon("system-software-update", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_ArrowUp))
+        self.btn_header_update.setObjectName("btnHeaderUpdate")
         self.btn_header_update.setIconSize(QtCore.QSize(16, 16))
         self.btn_header_update.clicked.connect(self._on_header_update_clicked)
         self.btn_header_update.setFixedHeight(30)
         self.btn_header_update.setMinimumWidth(115)
         self.btn_header_update.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        self.btn_header_update.setStyleSheet("""
-            QPushButton {
-                background-color: #f1f5f9;
-                color: #1e293b;
-                border: 1px solid #e2e8f0;
-                font-weight: 600;
-                font-size: 11px;
-                border-radius: 6px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #e2e8f0;
-            }
-        """)
         h_layout.addWidget(self.btn_header_update)
 
         # Badge de estado de Docker (misma altura y padding uniforme, sin emojis)
         self.lbl_docker_badge = QtWidgets.QLabel("● Comprobando Docker...")
         self.lbl_docker_badge.setFixedHeight(30)
         self.lbl_docker_badge.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.lbl_docker_badge.setStyleSheet("""
-            background-color: #fef3c7;
-            color: #b45309;
-            font-size: 11px;
-            font-weight: 700;
-            padding: 0 12px;
-            border-radius: 6px;
-        """)
+        self._style_badge(self.lbl_docker_badge, "● Comprobando Docker...", "warning")
         h_layout.addWidget(self.lbl_docker_badge)
 
         # Botón de Docker (mismo tamaño y altura que el de actualización, icono nativo moderno)
         self.btn_docker = QtWidgets.QPushButton("Docker")
-        self.btn_docker.setIcon(get_themed_icon("view-refresh", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
+        self.btn_docker.setObjectName("btnDocker")
         self.btn_docker.setIconSize(QtCore.QSize(16, 16))
         self.btn_docker.clicked.connect(self._on_docker_button_clicked)
         self.btn_docker.setFixedHeight(30)
         self.btn_docker.setMinimumWidth(115)
         self.btn_docker.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        self.btn_docker.setStyleSheet("""
-            QPushButton {
-                background-color: #f1f5f9;
-                color: #1e293b;
-                border: 1px solid #e2e8f0;
-                font-weight: 600;
-                font-size: 11px;
-                border-radius: 6px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #e2e8f0;
-            }
-        """)
         h_layout.addWidget(self.btn_docker)
 
         parent_layout.addWidget(header)
 
     def _build_action_bar(self, parent_layout: QtWidgets.QVBoxLayout):
         card = QtWidgets.QFrame()
+        card.setProperty("card", True)
         card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         c_layout = QtWidgets.QVBoxLayout(card)
         c_layout.setContentsMargins(14, 10, 14, 10)
@@ -709,7 +959,8 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         prog_row.addWidget(self.prog_bar, 1)
 
         self.lbl_progress = QtWidgets.QLabel("Listo")
-        self.lbl_progress.setStyleSheet("font-size: 11px; color: #64748b;")
+        self.lbl_progress.setObjectName("lblProgress")
+        self.lbl_progress.setProperty("secondary", True)
         prog_row.addWidget(self.lbl_progress)
 
         c_layout.addLayout(prog_row)
@@ -731,27 +982,27 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         # 1. Configuración
         tab_config = QtWidgets.QWidget()
         self._build_config_tab(tab_config)
-        self.tab_widget.addTab(tab_config, get_themed_icon("document-properties", color="#475569", selected_color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_FileDialogDetailedView), "Configuración de simulación")
+        self.tab_widget.addTab(tab_config, QtGui.QIcon(), "Configuración de simulación")
 
         # 2. Logs
         tab_logs = QtWidgets.QWidget()
         self._build_logs_tab(tab_logs)
-        self.tab_widget.addTab(tab_logs, get_themed_icon("utilities-terminal", color="#475569", selected_color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_FileDialogContentsView), "Salida y logs")
+        self.tab_widget.addTab(tab_logs, QtGui.QIcon(), "Salida y logs")
 
         # 3. Comandos Rápidos
         tab_quick = QtWidgets.QWidget()
         self._build_quick_tab(tab_quick)
-        self.tab_widget.addTab(tab_quick, get_themed_icon("applications-development", color="#475569", selected_color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_CommandLink), "Comandos rápidos")
+        self.tab_widget.addTab(tab_quick, QtGui.QIcon(), "Comandos rápidos")
 
         # 4. Ajustes Avanzados
         tab_advanced = QtWidgets.QWidget()
         self._build_advanced_tab(tab_advanced)
-        self.tab_widget.addTab(tab_advanced, get_themed_icon("applications-system", color="#475569", selected_color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_FileDialogListView), "Ajustes avanzados")
+        self.tab_widget.addTab(tab_advanced, QtGui.QIcon(), "Ajustes avanzados")
 
         # 5. Guía del Estudiante
         tab_guide = QtWidgets.QWidget()
         self._build_guide_tab(tab_guide)
-        self.tab_widget.addTab(tab_guide, get_themed_icon("help-browser", color="#475569", selected_color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_DialogHelpButton), "Guía del estudiante")
+        self.tab_widget.addTab(tab_guide, QtGui.QIcon(), "Guía del estudiante")
 
         # Asegurar que la pestaña seleccionada (fondo azul) tenga icono blanco puro
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
@@ -760,12 +1011,14 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         parent_layout.addWidget(self.tab_widget, 1)
 
     def _on_tab_changed(self, current_index: int):
-        """Tiñe de blanco el icono de la pestaña seleccionada y de gris las inactivas."""
+        """Tiñe de blanco el icono de la pestaña seleccionada y de color accesible las inactivas."""
+        is_dark = getattr(self, "_is_dark", False)
+        p = THEME_PALETTES["dark" if is_dark else "light"]
         for i, key in enumerate(self.tab_icon_keys):
             if i == current_index:
-                self.tab_widget.setTabIcon(i, get_themed_icon(key, color="#ffffff"))
+                self.tab_widget.setTabIcon(i, get_themed_icon(key, color=p["tab_icon_selected"]))
             else:
-                self.tab_widget.setTabIcon(i, get_themed_icon(key, color="#475569"))
+                self.tab_widget.setTabIcon(i, get_themed_icon(key, color=p["tab_icon_normal"]))
 
     def _build_config_tab(self, parent: QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(parent)
@@ -774,6 +1027,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         # Tarjeta de Workspace
         ws_card = QtWidgets.QFrame()
+        ws_card.setProperty("card", True)
         ws_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         ws_layout = QtWidgets.QVBoxLayout(ws_card)
         ws_layout.setContentsMargins(16, 14, 16, 14)
@@ -781,7 +1035,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         ws_head = QtWidgets.QHBoxLayout()
         lbl_ws_title = QtWidgets.QLabel("Espacio de trabajo en Windows (workspace)")
-        lbl_ws_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #1e3a8a;")
+        lbl_ws_title.setProperty("heading", True)
         ws_head.addWidget(lbl_ws_title)
         ws_head.addStretch()
         ws_layout.addLayout(ws_head)
@@ -791,21 +1045,19 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.ent_ws_path.textChanged.connect(self._on_workspace_path_edited)
         ws_input_row.addWidget(self.ent_ws_path, 1)
 
-        btn_browse = QtWidgets.QPushButton("Explorar...")
-        btn_browse.setIcon(get_themed_icon("document-open", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_DialogOpenButton))
-        btn_browse.setIconSize(QtCore.QSize(16, 16))
-        btn_browse.clicked.connect(self._on_browse_workspace)
-        ws_input_row.addWidget(btn_browse)
+        self.btn_browse = QtWidgets.QPushButton("Explorar...")
+        self.btn_browse.setIconSize(QtCore.QSize(16, 16))
+        self.btn_browse.clicked.connect(self._on_browse_workspace)
+        ws_input_row.addWidget(self.btn_browse)
         ws_layout.addLayout(ws_input_row)
 
         ws_feedback = QtWidgets.QHBoxLayout()
         self.lbl_ws_status = QtWidgets.QLabel("Validando ruta...")
-        self.lbl_ws_status.setStyleSheet("font-size: 11px; color: #64748b;")
         ws_feedback.addWidget(self.lbl_ws_status)
         ws_feedback.addStretch()
 
         lbl_ws_note = QtWidgets.QLabel("Se monta como volumen en /ros2_ws/src en el contenedor.")
-        lbl_ws_note.setStyleSheet("font-size: 11px; font-style: italic; color: #94a3b8;")
+        lbl_ws_note.setProperty("note", True)
         ws_feedback.addWidget(lbl_ws_note)
         ws_layout.addLayout(ws_feedback)
 
@@ -813,13 +1065,14 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         # Tarjeta de Parámetros de Simulación
         param_card = QtWidgets.QFrame()
+        param_card.setProperty("card", True)
         param_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         p_layout = QtWidgets.QVBoxLayout(param_card)
         p_layout.setContentsMargins(16, 14, 16, 14)
         p_layout.setSpacing(10)
 
         lbl_param_title = QtWidgets.QLabel("Parámetros de simulación")
-        lbl_param_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #1e3a8a;")
+        lbl_param_title.setProperty("heading", True)
         p_layout.addWidget(lbl_param_title)
 
         grid = QtWidgets.QGridLayout()
@@ -860,17 +1113,12 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         # Descripción del escenario
         self.scenario_desc_frame = QtWidgets.QFrame()
-        self.scenario_desc_frame.setStyleSheet("""
-            background-color: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            padding: 8px 12px;
-        """)
+        self.scenario_desc_frame.setObjectName("scenarioDescFrame")
         desc_layout = QtWidgets.QHBoxLayout(self.scenario_desc_frame)
         desc_layout.setContentsMargins(0, 0, 0, 0)
 
         self.lbl_scenario_desc = QtWidgets.QLabel("")
-        self.lbl_scenario_desc.setStyleSheet("font-size: 11px; font-style: italic; color: #475569;")
+        self.lbl_scenario_desc.setObjectName("lblScenarioDesc")
         desc_layout.addWidget(self.lbl_scenario_desc)
         p_layout.addWidget(self.scenario_desc_frame)
 
@@ -890,35 +1138,23 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         ctrl_bar.addStretch()
 
-        btn_scroll_bottom = QtWidgets.QPushButton("Ir al final")
-        btn_scroll_bottom.setIcon(get_themed_icon("go-down", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_ArrowDown))
-        btn_scroll_bottom.setIconSize(QtCore.QSize(16, 16))
-        btn_scroll_bottom.clicked.connect(self._scroll_to_bottom)
-        ctrl_bar.addWidget(btn_scroll_bottom)
+        self.btn_scroll_bottom = QtWidgets.QPushButton("Ir al final")
+        self.btn_scroll_bottom.setIconSize(QtCore.QSize(16, 16))
+        self.btn_scroll_bottom.clicked.connect(self._scroll_to_bottom)
+        ctrl_bar.addWidget(self.btn_scroll_bottom)
 
-        btn_clear = QtWidgets.QPushButton("Limpiar logs")
-        btn_clear.setIcon(get_themed_icon("edit-clear", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_DialogResetButton))
-        btn_clear.setIconSize(QtCore.QSize(16, 16))
-        btn_clear.clicked.connect(self._clear_logs)
-        ctrl_bar.addWidget(btn_clear)
+        self.btn_clear = QtWidgets.QPushButton("Limpiar logs")
+        self.btn_clear.setIconSize(QtCore.QSize(16, 16))
+        self.btn_clear.clicked.connect(self._clear_logs)
+        ctrl_bar.addWidget(self.btn_clear)
 
         layout.addLayout(ctrl_bar)
 
-        # Consola de texto oscura
+        # Consola de texto oscura (adaptada al tema global con Cascadia Code / Consolas)
         self.txt_logs = QtWidgets.QPlainTextEdit()
+        self.txt_logs.setObjectName("txtLogs")
         self.txt_logs.setReadOnly(True)
         self.txt_logs.setMaximumBlockCount(10000)
-        self.txt_logs.setStyleSheet("""
-            QPlainTextEdit {
-                background-color: #18181b;
-                color: #e4e4e7;
-                border: 1px solid #27272a;
-                border-radius: 6px;
-                padding: 10px;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 12px;
-            }
-        """)
         layout.addWidget(self.txt_logs, 1)
 
     def _build_quick_tab(self, parent: QtWidgets.QWidget):
@@ -930,55 +1166,53 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         # Tarjeta de Comandos de Inspección
         cmd_card = QtWidgets.QFrame()
+        cmd_card.setProperty("card", True)
         cmd_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         cmd_layout = QtWidgets.QVBoxLayout(cmd_card)
         cmd_layout.setContentsMargins(16, 14, 16, 14)
         cmd_layout.setSpacing(12)
 
         lbl_intro = QtWidgets.QLabel("Comandos de inspección y control")
-        lbl_intro.setStyleSheet("font-size: 15px; font-weight: 700; color: #1e3a8a;")
+        lbl_intro.setProperty("heading", True)
         cmd_layout.addWidget(lbl_intro)
 
         # Grid de botones rápidos
         grid = QtWidgets.QGridLayout()
         grid.setSpacing(10)
 
-        btn_topics = QtWidgets.QPushButton("Listar topics (ros2 topic list)")
-        btn_topics.setIcon(get_themed_icon("emblem-documents", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_FileDialogDetailedView))
-        btn_topics.setIconSize(QtCore.QSize(16, 16))
-        btn_topics.clicked.connect(lambda: self._execute_quick_command("ros2 topic list"))
-        grid.addWidget(btn_topics, 0, 0)
+        self.btn_topics = QtWidgets.QPushButton("Listar topics (ros2 topic list)")
+        self.btn_topics.setIconSize(QtCore.QSize(16, 16))
+        self.btn_topics.clicked.connect(lambda: self._execute_quick_command("ros2 topic list"))
+        grid.addWidget(self.btn_topics, 0, 0)
 
-        btn_nodes = QtWidgets.QPushButton("Listar nodos (ros2 node list)")
-        btn_nodes.setIcon(get_themed_icon("network-wired", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_FileDialogContentsView))
-        btn_nodes.setIconSize(QtCore.QSize(16, 16))
-        btn_nodes.clicked.connect(lambda: self._execute_quick_command("ros2 node list"))
-        grid.addWidget(btn_nodes, 0, 1)
+        self.btn_nodes = QtWidgets.QPushButton("Listar nodos (ros2 node list)")
+        self.btn_nodes.setIconSize(QtCore.QSize(16, 16))
+        self.btn_nodes.clicked.connect(lambda: self._execute_quick_command("ros2 node list"))
+        grid.addWidget(self.btn_nodes, 0, 1)
 
-        btn_topics_info = QtWidgets.QPushButton("Topics con tipo (ros2 topic list -t)")
-        btn_topics_info.setIcon(get_themed_icon("accessories-character-map", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_FileDialogInfoView))
-        btn_topics_info.setIconSize(QtCore.QSize(16, 16))
-        btn_topics_info.clicked.connect(lambda: self._execute_quick_command("ros2 topic list -t"))
-        grid.addWidget(btn_topics_info, 1, 0)
+        self.btn_topics_info = QtWidgets.QPushButton("Topics con tipo (ros2 topic list -t)")
+        self.btn_topics_info.setIconSize(QtCore.QSize(16, 16))
+        self.btn_topics_info.clicked.connect(lambda: self._execute_quick_command("ros2 topic list -t"))
+        grid.addWidget(self.btn_topics_info, 1, 0)
 
-        btn_compile = QtWidgets.QPushButton("Compilar workspace (colcon build)")
-        btn_compile.setIcon(get_themed_icon("applications-development", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_CommandLink))
-        btn_compile.setIconSize(QtCore.QSize(16, 16))
-        btn_compile.clicked.connect(self._on_compile_workspace)
-        grid.addWidget(btn_compile, 1, 1)
+        self.btn_compile = QtWidgets.QPushButton("Compilar workspace (colcon build)")
+        self.btn_compile.setIconSize(QtCore.QSize(16, 16))
+        self.btn_compile.clicked.connect(self._on_compile_workspace)
+        grid.addWidget(self.btn_compile, 1, 1)
 
         cmd_layout.addLayout(grid)
         layout.addWidget(cmd_card)
 
         # Tarjeta para comando personalizado
         custom_card = QtWidgets.QFrame()
+        custom_card.setProperty("card", True)
         custom_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         c_layout = QtWidgets.QVBoxLayout(custom_card)
         c_layout.setContentsMargins(16, 14, 16, 14)
         c_layout.setSpacing(10)
 
         lbl_custom = QtWidgets.QLabel("Comando ROS 2 personalizado")
-        lbl_custom.setStyleSheet("font-size: 15px; font-weight: 700; color: #1e3a8a;")
+        lbl_custom.setProperty("heading", True)
         c_layout.addWidget(lbl_custom)
 
         custom_row = QtWidgets.QHBoxLayout()
@@ -995,7 +1229,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         c_layout.addLayout(custom_row)
 
         lbl_custom_note = QtWidgets.QLabel("La salida del comando se imprimirá en directo en la pestaña 'Salida y logs'.")
-        lbl_custom_note.setStyleSheet("font-size: 11px; font-style: italic; color: #64748b;")
+        lbl_custom_note.setProperty("note", True)
         c_layout.addWidget(lbl_custom_note)
 
         layout.addWidget(custom_card)
@@ -1010,13 +1244,14 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         # Tarjeta Ajustes de Red y Entorno
         net_card = QtWidgets.QFrame()
+        net_card.setProperty("card", True)
         net_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         n_layout = QtWidgets.QVBoxLayout(net_card)
         n_layout.setContentsMargins(16, 14, 16, 14)
         n_layout.setSpacing(10)
 
         lbl_net_title = QtWidgets.QLabel("Ajustes de red y entorno")
-        lbl_net_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #1e3a8a;")
+        lbl_net_title.setProperty("heading", True)
         n_layout.addWidget(lbl_net_title)
 
         # Fila Puerto Web noVNC
@@ -1029,7 +1264,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.ent_web_port.textChanged.connect(self._save_current_settings)
         row_port.addWidget(self.ent_web_port)
         lbl_port_note = QtWidgets.QLabel("(Por defecto: 6080 -> http://localhost:6080/vnc.html)")
-        lbl_port_note.setStyleSheet("font-size: 11px; font-style: italic; color: #64748b;")
+        lbl_port_note.setProperty("note", True)
         row_port.addWidget(lbl_port_note)
         row_port.addStretch()
         n_layout.addLayout(row_port)
@@ -1053,27 +1288,26 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         # Tarjeta Mantenimiento Docker
         maint_card = QtWidgets.QFrame()
+        maint_card.setProperty("card", True)
         maint_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         m_layout = QtWidgets.QVBoxLayout(maint_card)
         m_layout.setContentsMargins(16, 14, 16, 14)
         m_layout.setSpacing(10)
 
         lbl_maint = QtWidgets.QLabel("Mantenimiento de Docker y caché")
-        lbl_maint.setStyleSheet("font-size: 15px; font-weight: 700; color: #1e3a8a;")
+        lbl_maint.setProperty("heading", True)
         m_layout.addWidget(lbl_maint)
 
         maint_row = QtWidgets.QHBoxLayout()
         self.btn_prep_image = QtWidgets.QPushButton("Reconstruir / preparar imagen Docker")
-        self.btn_prep_image.setIcon(get_themed_icon("view-refresh", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
         self.btn_prep_image.setIconSize(QtCore.QSize(16, 16))
         self.btn_prep_image.clicked.connect(self._on_pull_or_build_image)
         maint_row.addWidget(self.btn_prep_image)
 
-        btn_clean_cache = QtWidgets.QPushButton("Limpiar volúmenes de caché")
-        btn_clean_cache.setIcon(get_themed_icon("user-trash", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_TrashIcon))
-        btn_clean_cache.setIconSize(QtCore.QSize(16, 16))
-        btn_clean_cache.clicked.connect(self._on_clean_build_cache)
-        maint_row.addWidget(btn_clean_cache)
+        self.btn_clean_cache = QtWidgets.QPushButton("Limpiar volúmenes de caché")
+        self.btn_clean_cache.setIconSize(QtCore.QSize(16, 16))
+        self.btn_clean_cache.clicked.connect(self._on_clean_build_cache)
+        maint_row.addWidget(self.btn_clean_cache)
         maint_row.addStretch()
         m_layout.addLayout(maint_row)
 
@@ -1081,28 +1315,28 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         # Tarjeta Actualizaciones GitHub
         upd_card = QtWidgets.QFrame()
+        upd_card.setProperty("card", True)
         upd_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         u_layout = QtWidgets.QVBoxLayout(upd_card)
         u_layout.setContentsMargins(16, 14, 16, 14)
         u_layout.setSpacing(10)
 
         lbl_upd = QtWidgets.QLabel("Actualizaciones del software")
-        lbl_upd.setStyleSheet("font-size: 15px; font-weight: 700; color: #1e3a8a;")
+        lbl_upd.setProperty("heading", True)
         u_layout.addWidget(lbl_upd)
 
         upd_row = QtWidgets.QHBoxLayout()
         lbl_inst = QtWidgets.QLabel(f"Versión instalada: v{CURRENT_VERSION}")
-        lbl_inst.setStyleSheet("font-weight: 600;")
+        lbl_inst.setProperty("heading_small", True)
         upd_row.addWidget(lbl_inst)
 
         self.btn_check_updates = QtWidgets.QPushButton("Comprobar actualizaciones")
-        self.btn_check_updates.setIcon(get_themed_icon("system-software-update", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
         self.btn_check_updates.setIconSize(QtCore.QSize(16, 16))
         self.btn_check_updates.clicked.connect(self._on_manual_check_updates)
         upd_row.addWidget(self.btn_check_updates)
 
         self.lbl_update_status = QtWidgets.QLabel("Comprobando al iniciar...")
-        self.lbl_update_status.setStyleSheet("font-size: 11px; font-style: italic; color: #64748b;")
+        self.lbl_update_status.setProperty("note", True)
         upd_row.addWidget(self.lbl_update_status)
         upd_row.addStretch()
         u_layout.addLayout(upd_row)
@@ -1111,7 +1345,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         # Ruta en AppData
         lbl_appdata = QtWidgets.QLabel(f"Archivo de configuración: {self.config_store.config_path}")
-        lbl_appdata.setStyleSheet("font-size: 11px; color: #94a3b8;")
+        lbl_appdata.setProperty("secondary", True)
         layout.addWidget(lbl_appdata)
         layout.addStretch()
 
@@ -1119,19 +1353,29 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         layout = QtWidgets.QVBoxLayout(parent)
         layout.setContentsMargins(14, 12, 14, 12)
 
-        txt_guide = QtWidgets.QTextBrowser()
-        txt_guide.setMarkdown(GUIDE_MARKDOWN)
-        txt_guide.setStyleSheet("""
-            QTextBrowser {
-                background-color: #ffffff;
-                border: 1px solid #e2e8f0;
-                border-radius: 6px;
-                padding: 16px;
-                font-size: 13px;
-                line-height: 1.5;
-            }
-        """)
-        layout.addWidget(txt_guide)
+        self.txt_guide = QtWidgets.QTextBrowser()
+        self.txt_guide.setObjectName("txtGuide")
+        self._update_guide_styles()
+        layout.addWidget(self.txt_guide)
+
+    def _update_guide_styles(self):
+        """Actualiza el estilo visual del Markdown de la guía según el tema activo."""
+        if not hasattr(self, "txt_guide"):
+            return
+        is_dark = getattr(self, "_is_dark", False)
+        p = THEME_PALETTES["dark" if is_dark else "light"]
+        h_color = p["text_title"]
+        text_color = p["text_primary"]
+        code_bg = "#0f172a" if is_dark else "#f1f5f9"
+        border_col = p["border"]
+        doc_css = f"""
+            body {{ color: {text_color}; }}
+            h1, h2, h3, h4 {{ color: {h_color}; font-weight: 700; }}
+            code {{ background-color: {code_bg}; color: {text_color}; font-family: monospace; padding: 2px 4px; border-radius: 4px; }}
+            hr {{ border: 1px solid {border_col}; }}
+        """
+        self.txt_guide.document().setDefaultStyleSheet(doc_css)
+        self.txt_guide.setMarkdown(GUIDE_MARKDOWN)
 
     # --- Persistencia y Carga de Configuraciones ---
 
@@ -1217,18 +1461,17 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self._save_current_settings()
 
     def _update_workspace_validation(self):
+        if not hasattr(self, "ent_ws_path") or not hasattr(self, "lbl_ws_status"):
+            return
         path_str = self.ent_ws_path.text().strip()
         is_valid, msg = ConfigStore.validate_workspace(path_str)
         if is_valid:
             if "detectado" in msg:
-                self.lbl_ws_status.setText(f"[OK] {msg}")
-                self.lbl_ws_status.setStyleSheet("font-size: 11px; color: #15803d; font-weight: 600;")
+                self._style_status_label(self.lbl_ws_status, f"[OK] {msg}", "success")
             else:
-                self.lbl_ws_status.setText(f"[OK] {msg}")
-                self.lbl_ws_status.setStyleSheet("font-size: 11px; color: #1e293b;")
+                self._style_status_label(self.lbl_ws_status, f"[OK] {msg}", "info")
         else:
-            self.lbl_ws_status.setText(f"[Aviso] {msg}")
-            self.lbl_ws_status.setStyleSheet("font-size: 11px; color: #dc2626; font-weight: 600;")
+            self._style_status_label(self.lbl_ws_status, f"[Aviso] {msg}", "error")
 
     def _on_robot_changed(self):
         selected_name = self.cbo_robot.currentText()
@@ -1295,11 +1538,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         if self._is_starting_docker:
             return
 
-        self.lbl_docker_badge.setText("● Comprobando Docker...")
-        self.lbl_docker_badge.setStyleSheet("""
-            background-color: #fef3c7; color: #b45309; font-size: 11px; font-weight: 700;
-            padding: 0 12px; border-radius: 6px;
-        """)
+        self._style_badge(self.lbl_docker_badge, "● Comprobando Docker...", "warning")
 
         def _worker():
             installed, _ = DockerService.check_docker_installed()
@@ -1317,48 +1556,35 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             return
 
         self._docker_running = running
-        style = self.style()
+        self._last_docker_status = (installed, running, daemon_msg)
+        is_dark = getattr(self, "_is_dark", False)
+        p = THEME_PALETTES["dark" if is_dark else "light"]
 
         if not installed:
-            self.lbl_docker_badge.setText("● Docker no encontrado")
-            self.lbl_docker_badge.setStyleSheet("""
-                background-color: #fee2e2; color: #b91c1c; font-size: 11px; font-weight: 700;
-                padding: 0 12px; border-radius: 6px;
-            """)
+            self._style_badge(self.lbl_docker_badge, "● Docker no encontrado", "error")
             self.btn_docker.setText("Instalar Docker")
-            self.btn_docker.setIcon(get_themed_icon("help-browser", color="#b91c1c", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_DialogHelpButton))
+            self.btn_docker.setIcon(get_themed_icon("help-browser", color="#f87171" if is_dark else "#b91c1c", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_DialogHelpButton))
             self.btn_docker.setToolTip("Docker no está instalado en este sistema. Clic para ver opciones de descarga.")
-            self.btn_docker.setStyleSheet("""
-                QPushButton {
-                    background-color: #fef2f2; color: #b91c1c; border: 1px solid #fecaca;
+            btn_bg = "rgba(239, 68, 68, 0.15)" if is_dark else "#fef2f2"
+            btn_fg = "#f87171" if is_dark else "#b91c1c"
+            btn_border = "#7f1d1d" if is_dark else "#fecaca"
+            self.btn_docker.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {btn_bg}; color: {btn_fg}; border: 1px solid {btn_border};
                     font-weight: 600; font-size: 11px; border-radius: 6px; padding: 0 10px;
-                }
-                QPushButton:hover { background-color: #fee2e2; }
+                }}
+                QPushButton:hover {{ background-color: {btn_border}; }}
             """)
             self.btn_docker.setEnabled(True)
         elif running:
-            self.lbl_docker_badge.setText(f"● {daemon_msg}")
-            self.lbl_docker_badge.setStyleSheet("""
-                background-color: #dcfce7; color: #15803d; font-size: 11px; font-weight: 700;
-                padding: 0 12px; border-radius: 6px;
-            """)
+            self._style_badge(self.lbl_docker_badge, f"● {daemon_msg}", "success")
             self.btn_docker.setText("Docker")
-            self.btn_docker.setIcon(get_themed_icon("view-refresh", color="#1e293b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
+            self.btn_docker.setIcon(get_themed_icon("view-refresh", color=p["icon_color"], fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
             self.btn_docker.setToolTip("Docker activo y funcionando. Clic para volver a comprobar el estado.")
-            self.btn_docker.setStyleSheet("""
-                QPushButton {
-                    background-color: #f1f5f9; color: #1e293b; border: 1px solid #e2e8f0;
-                    font-weight: 600; font-size: 11px; border-radius: 6px; padding: 0 10px;
-                }
-                QPushButton:hover { background-color: #e2e8f0; }
-            """)
+            self.btn_docker.setStyleSheet("")  # Regla QSS global #btnDocker
             self.btn_docker.setEnabled(True)
         else:
-            self.lbl_docker_badge.setText("● Docker detenido")
-            self.lbl_docker_badge.setStyleSheet("""
-                background-color: #fef3c7; color: #b45309; font-size: 11px; font-weight: 700;
-                padding: 0 12px; border-radius: 6px;
-            """)
+            self._style_badge(self.lbl_docker_badge, "● Docker detenido", "warning")
             self.btn_docker.setText("Iniciar Docker")
             self.btn_docker.setIcon(get_themed_icon("media-playback-start", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_MediaPlay))
             self.btn_docker.setToolTip("Docker no está corriendo. Clic para arrancar Docker Desktop en Windows.")
@@ -1398,20 +1624,12 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             return
 
         self._is_starting_docker = True
-        self.lbl_docker_badge.setText("● Arrancando Docker...")
-        self.lbl_docker_badge.setStyleSheet("""
-            background-color: #dbeafe; color: #1e40af; font-size: 11px; font-weight: 700;
-            padding: 0 12px; border-radius: 6px;
-        """)
+        is_dark = getattr(self, "_is_dark", False)
+        self._style_badge(self.lbl_docker_badge, "● Arrancando Docker...", "info")
         self.btn_docker.setText("Arrancando...")
-        self.btn_docker.setIcon(get_themed_icon("process-working", color="#64748b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
+        self.btn_docker.setIcon(get_themed_icon("process-working", color="#94a3b8" if is_dark else "#64748b", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
         self.btn_docker.setEnabled(False)
-        self.btn_docker.setStyleSheet("""
-            QPushButton {
-                background-color: #e2e8f0; color: #64748b; border: 1px solid #cbd5e1;
-                font-weight: 600; font-size: 11px; border-radius: 6px; padding: 0 10px;
-            }
-        """)
+        self.btn_docker.setStyleSheet("")
 
         self._append_log("\n[Docker] Iniciando Docker Desktop en segundo plano...\nPor favor espera mientras el motor se inicializa.\n")
         self.lbl_progress.setText("Arrancando Docker Desktop...")
@@ -1437,50 +1655,30 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
     def _poll_docker_tick(self):
         self._docker_poll_count += 1
-
-        # Máximo 36 comprobaciones (~90 segundos)
-        if self._docker_poll_count > 36:
-            if self._docker_poll_timer:
-                self._docker_poll_timer.stop()
-            self._is_starting_docker = False
-            self._check_docker_live_status()
-            self.lbl_progress.setText("Tiempo límite de espera alcanzado")
-            self._append_log("[Docker] Tiempo límite de espera alcanzado. Docker Desktop puede seguir inicializándose en segundo plano.\n")
-            QtWidgets.QMessageBox.information(
-                self,
-                "Docker Desktop",
-                "Docker Desktop se ha iniciado, pero el motor tardó más de lo esperado en responder.\n\n"
-                "Comprueba la bandeja del sistema de Windows y pulsa 'Docker' una vez que esté listo."
-            )
-            return
-
-        def _worker():
-            running, daemon_msg = DockerService.check_docker_running()
-            if running:
-                self.sig_docker_ready.emit(daemon_msg)
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    @QtCore.Slot(str)
-    def _on_docker_ready(self, daemon_msg: str):
-        if self._docker_poll_timer:
+        running, _ = DockerService.check_docker_running()
+        if running:
             self._docker_poll_timer.stop()
+            self._is_starting_docker = False
+            self.sig_docker_ready.emit()
+        elif self._docker_poll_count >= 24:
+            self._docker_poll_timer.stop()
+            self._is_starting_docker = False
+            self.sig_docker_failed.emit("Tiempo de espera agotado al arrancar Docker Desktop (60s).")
+
+    @QtCore.Slot()
+    def _on_docker_ready(self):
         self._is_starting_docker = False
-        self._docker_running = True
-        self._apply_docker_status(True, True, daemon_msg)
-        self.lbl_progress.setText("Docker Desktop listo")
-        self._append_log(f"[Docker] ¡Docker Desktop está listo y operativo! ({daemon_msg})\n")
+        self._append_log("[Docker] Docker Desktop ha arrancado correctamente.\n")
+        self.lbl_progress.setText("Docker listo")
+        self._check_docker_live_status()
 
     @QtCore.Slot(str)
     def _on_docker_start_failed(self, err_msg: str):
-        if self._docker_poll_timer:
-            self._docker_poll_timer.stop()
         self._is_starting_docker = False
-        self._docker_running = False
-        self._check_docker_live_status()
+        self._append_log(f"[Error Docker] No se pudo arrancar Docker Desktop: {err_msg}\n")
         self.lbl_progress.setText("Error al arrancar Docker")
-        self._append_log(f"[Error Docker] {err_msg}\n")
-        QtWidgets.QMessageBox.warning(self, "Arrancar Docker Desktop", err_msg)
+        self._check_docker_live_status()
+        self._show_warning_box("Docker", f"No se pudo arrancar Docker Desktop automáticamente:\n\n{err_msg}")
 
     # --- Actualizaciones Automáticas ---
 
@@ -1492,7 +1690,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
     def _check_for_updates_background(self):
         def _worker():
-            has_update, info, msg = check_for_updates(timeout=2.5)
+            has_update, info, _ = check_for_updates(timeout=3.0)
             if has_update and info:
                 ver = info.get("version", "")
                 self.latest_update_info = info
@@ -1516,8 +1714,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             }
             QPushButton:hover { background-color: #15803d; }
         """)
-        self.lbl_update_status.setText(f"Nueva versión v{ver} disponible")
-        self.lbl_update_status.setStyleSheet("font-size: 11px; color: #16a34a; font-weight: 600;")
+        self._style_status_label(self.lbl_update_status, f"Nueva versión v{ver} disponible", "success")
         if self.latest_update_info:
             self._prompt_update_available(self.latest_update_info)
 
@@ -1528,8 +1725,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
     def _on_manual_check_updates(self):
         self.btn_check_updates.setEnabled(False)
-        self.lbl_update_status.setText("Buscando nueva versión en GitHub...")
-        self.lbl_update_status.setStyleSheet("font-size: 11px; color: #64748b; font-style: italic;")
+        self._style_status_label(self.lbl_update_status, "Buscando nueva versión en GitHub...", "info")
 
         def _worker():
             has_update, info, msg = check_for_updates(timeout=3.5)
@@ -1549,13 +1745,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 background-color: #16a34a; color: #ffffff; font-weight: 700;
                 padding: 0 10px; font-size: 11px; border-radius: 6px; border: none;
             """)
-            self.lbl_update_status.setText(f"Nueva versión v{ver} disponible")
-            self.lbl_update_status.setStyleSheet("font-size: 11px; color: #16a34a; font-weight: 600;")
+            self._style_status_label(self.lbl_update_status, f"Nueva versión v{ver} disponible", "success")
             self._prompt_update_available(info)
         elif info:
             self.latest_update_info = None
-            self.lbl_update_status.setText(f"Al día (v{CURRENT_VERSION})")
-            self.lbl_update_status.setStyleSheet("font-size: 11px; color: #15803d;")
+            self._style_status_label(self.lbl_update_status, f"Al día (v{CURRENT_VERSION})", "success")
             QtWidgets.QMessageBox.information(
                 self,
                 "Actualizaciones",
@@ -1563,8 +1757,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             )
         else:
             self.latest_update_info = None
-            self.lbl_update_status.setText(msg)
-            self.lbl_update_status.setStyleSheet("font-size: 11px; color: #dc2626;")
+            self._style_status_label(self.lbl_update_status, msg, "error")
             QtWidgets.QMessageBox.warning(self, "Actualizaciones", msg)
 
     # --- Acciones Principales: Terminal Docker, Simulación, Web ---
@@ -2040,15 +2233,11 @@ class ExceptionModalDialog(QtWidgets.QDialog):
         main_layout.addWidget(header_card)
 
         # 2. Texto informativo con destinatario
-        lbl_info = QtWidgets.QLabel(
-            f"Se ha producido una excepción no controlada durante la ejecución. "
-            f"Puedes copiar el informe técnico con la traza completa y enviarlo por correo "
-            f"a <b><a style='color: #2563eb; text-decoration: none;' href='mailto:{SUPPORT_EMAIL}'>{SUPPORT_EMAIL}</a></b>"
-        )
-        lbl_info.setWordWrap(True)
-        lbl_info.setOpenExternalLinks(True)
-        lbl_info.setStyleSheet("font-size: 13px; color: #334155; line-height: 1.4;")
-        main_layout.addWidget(lbl_info)
+        self.lbl_info = QtWidgets.QLabel()
+        self.lbl_info.setObjectName("lblInfo")
+        self.lbl_info.setWordWrap(True)
+        self.lbl_info.setOpenExternalLinks(True)
+        main_layout.addWidget(self.lbl_info)
 
         # 3. Visor de la traza de error
         self.txt_report = QtWidgets.QPlainTextEdit()
@@ -2068,14 +2257,12 @@ class ExceptionModalDialog(QtWidgets.QDialog):
 
         self.btn_copy = QtWidgets.QPushButton("Copiar informe de error")
         self.btn_copy.setObjectName("btnCopy")
-        self.btn_copy.setIcon(get_themed_icon("emblem-documents", color="#ffffff"))
         self.btn_copy.setIconSize(QtCore.QSize(18, 18))
         self.btn_copy.clicked.connect(self._copy_to_clipboard)
         btn_layout.addWidget(self.btn_copy)
 
         self.btn_email = QtWidgets.QPushButton("Enviar por correo")
         self.btn_email.setObjectName("btnEmail")
-        self.btn_email.setIcon(get_themed_icon("applications-internet", color="#1e293b"))
         self.btn_email.setIconSize(QtCore.QSize(18, 18))
         self.btn_email.clicked.connect(self._open_email_client)
         btn_layout.addWidget(self.btn_email)
@@ -2084,7 +2271,6 @@ class ExceptionModalDialog(QtWidgets.QDialog):
 
         self.btn_close = QtWidgets.QPushButton("Cerrar aplicación")
         self.btn_close.setObjectName("btnClose")
-        self.btn_close.setIcon(get_themed_icon("window-close", color="#475569"))
         self.btn_close.setIconSize(QtCore.QSize(18, 18))
         self.btn_close.clicked.connect(self.reject)
         btn_layout.addWidget(self.btn_close)
@@ -2092,83 +2278,188 @@ class ExceptionModalDialog(QtWidgets.QDialog):
         main_layout.addLayout(btn_layout)
 
     def _apply_styles(self):
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #f8fafc;
-                font-family: 'Segoe UI', system-ui, sans-serif;
-            }
-            #headerCard {
-                background-color: #ffffff;
-                border: 1px solid #fee2e2;
-                border-radius: 8px;
-            }
-            #badgeError {
-                background-color: #fee2e2;
-                color: #b91c1c;
-                font-weight: 700;
-                font-size: 12px;
-                padding: 4px 10px;
-                border-radius: 6px;
-            }
-            #titleLabel {
-                color: #0f172a;
-                font-size: 13px;
-                margin-left: 8px;
-            }
-            #reportBox {
-                background-color: #0f172a;
-                color: #f1f5f9;
-                font-family: 'Consolas', 'Cascadia Code', 'Courier New', monospace;
-                font-size: 11px;
-                border: 1px solid #cbd5e1;
-                border-radius: 6px;
-                padding: 8px;
-            }
-            #feedbackLabel {
-                font-size: 12px;
-                color: #16a34a;
-                font-weight: 600;
-                min-height: 16px;
-            }
-            #btnCopy {
-                background-color: #2563eb;
-                color: #ffffff;
-                font-weight: 600;
-                font-size: 13px;
-                padding: 7px 16px;
-                border-radius: 6px;
-                border: none;
-            }
-            #btnCopy:hover {
-                background-color: #1d4ed8;
-            }
-            #btnEmail {
-                background-color: #ffffff;
-                color: #0f172a;
-                font-weight: 600;
-                font-size: 13px;
-                padding: 7px 16px;
-                border-radius: 6px;
-                border: 1px solid #cbd5e1;
-            }
-            #btnEmail:hover {
-                background-color: #f1f5f9;
-            }
-            #btnClose {
-                background-color: transparent;
-                color: #475569;
-                font-weight: 600;
-                font-size: 13px;
-                padding: 7px 16px;
-                border-radius: 6px;
-                border: 1px solid #cbd5e1;
-            }
-            #btnClose:hover {
-                background-color: #fee2e2;
-                color: #b91c1c;
-                border-color: #fca5a5;
-            }
-        """)
+        is_dark = is_dark_mode()
+        set_window_dark_mode(int(self.winId()), is_dark)
+
+        link_col = "#60a5fa" if is_dark else "#2563eb"
+        self.lbl_info.setText(
+            f"Se ha producido una excepción no controlada durante la ejecución. "
+            f"Puedes copiar el informe técnico con la traza completa y enviarlo por correo "
+            f"a <b><a style='color: {link_col}; text-decoration: none;' href='mailto:{SUPPORT_EMAIL}'>{SUPPORT_EMAIL}</a></b>"
+        )
+
+        self.btn_copy.setIcon(get_themed_icon("emblem-documents", color="#ffffff"))
+        btn_email_icon_col = "#f8fafc" if is_dark else "#1e293b"
+        self.btn_email.setIcon(get_themed_icon("applications-internet", color=btn_email_icon_col))
+        btn_close_icon_col = "#94a3b8" if is_dark else "#475569"
+        self.btn_close.setIcon(get_themed_icon("window-close", color=btn_close_icon_col))
+
+        if is_dark:
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: #0f172a;
+                    font-family: 'Segoe UI', system-ui, sans-serif;
+                }
+                #headerCard {
+                    background-color: #1e293b;
+                    border: 1px solid #7f1d1d;
+                    border-radius: 8px;
+                }
+                #badgeError {
+                    background-color: rgba(239, 68, 68, 0.2);
+                    color: #f87171;
+                    font-weight: 700;
+                    font-size: 12px;
+                    padding: 4px 10px;
+                    border-radius: 6px;
+                }
+                #titleLabel {
+                    color: #f8fafc;
+                    font-size: 13px;
+                    margin-left: 8px;
+                }
+                #lblInfo {
+                    font-size: 13px;
+                    color: #cbd5e1;
+                    line-height: 1.4;
+                }
+                #reportBox {
+                    background-color: #020617;
+                    color: #f1f5f9;
+                    font-family: 'Consolas', 'Cascadia Code', 'Courier New', monospace;
+                    font-size: 11px;
+                    border: 1px solid #334155;
+                    border-radius: 6px;
+                    padding: 8px;
+                }
+                #feedbackLabel {
+                    font-size: 12px;
+                    color: #4ade80;
+                    font-weight: 600;
+                    min-height: 16px;
+                }
+                #btnCopy {
+                    background-color: #2563eb;
+                    color: #ffffff;
+                    font-weight: 600;
+                    font-size: 13px;
+                    padding: 7px 16px;
+                    border-radius: 6px;
+                    border: none;
+                }
+                #btnCopy:hover {
+                    background-color: #1d4ed8;
+                }
+                #btnEmail {
+                    background-color: #1e293b;
+                    color: #f8fafc;
+                    font-weight: 600;
+                    font-size: 13px;
+                    padding: 7px 16px;
+                    border-radius: 6px;
+                    border: 1px solid #334155;
+                }
+                #btnEmail:hover {
+                    background-color: #334155;
+                }
+                #btnClose {
+                    background-color: transparent;
+                    color: #94a3b8;
+                    font-weight: 600;
+                    font-size: 13px;
+                    padding: 7px 16px;
+                    border-radius: 6px;
+                    border: 1px solid #334155;
+                }
+                #btnClose:hover {
+                    background-color: rgba(239, 68, 68, 0.2);
+                    color: #f87171;
+                    border-color: #ef4444;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: #f8fafc;
+                    font-family: 'Segoe UI', system-ui, sans-serif;
+                }
+                #headerCard {
+                    background-color: #ffffff;
+                    border: 1px solid #fee2e2;
+                    border-radius: 8px;
+                }
+                #badgeError {
+                    background-color: #fee2e2;
+                    color: #b91c1c;
+                    font-weight: 700;
+                    font-size: 12px;
+                    padding: 4px 10px;
+                    border-radius: 6px;
+                }
+                #titleLabel {
+                    color: #0f172a;
+                    font-size: 13px;
+                    margin-left: 8px;
+                }
+                #lblInfo {
+                    font-size: 13px;
+                    color: #334155;
+                    line-height: 1.4;
+                }
+                #reportBox {
+                    background-color: #0f172a;
+                    color: #f1f5f9;
+                    font-family: 'Consolas', 'Cascadia Code', 'Courier New', monospace;
+                    font-size: 11px;
+                    border: 1px solid #cbd5e1;
+                    border-radius: 6px;
+                    padding: 8px;
+                }
+                #feedbackLabel {
+                    font-size: 12px;
+                    color: #16a34a;
+                    font-weight: 600;
+                    min-height: 16px;
+                }
+                #btnCopy {
+                    background-color: #2563eb;
+                    color: #ffffff;
+                    font-weight: 600;
+                    font-size: 13px;
+                    padding: 7px 16px;
+                    border-radius: 6px;
+                    border: none;
+                }
+                #btnCopy:hover {
+                    background-color: #1d4ed8;
+                }
+                #btnEmail {
+                    background-color: #ffffff;
+                    color: #0f172a;
+                    font-weight: 600;
+                    font-size: 13px;
+                    padding: 7px 16px;
+                    border-radius: 6px;
+                    border: 1px solid #cbd5e1;
+                }
+                #btnEmail:hover {
+                    background-color: #f1f5f9;
+                }
+                #btnClose {
+                    background-color: transparent;
+                    color: #475569;
+                    font-weight: 600;
+                    font-size: 13px;
+                    padding: 7px 16px;
+                    border-radius: 6px;
+                    border: 1px solid #cbd5e1;
+                }
+                #btnClose:hover {
+                    background-color: #fee2e2;
+                    color: #b91c1c;
+                    border-color: #fca5a5;
+                }
+            """)
 
     def _copy_to_clipboard(self):
         clipboard = QtWidgets.QApplication.clipboard()

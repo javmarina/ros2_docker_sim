@@ -64,18 +64,22 @@ CHEVRON_DOWN_PNG_BASE64 = (
 )
 
 
-def get_dropdown_arrow_path() -> Path:
+def get_dropdown_arrow_path(dark_mode: bool = False) -> Path:
     """
-    Retorna la ruta al archivo PNG de la flecha del dropdown.
+    Retorna la ruta al archivo de la flecha del dropdown (PNG o SVG).
+    Soporta modo claro (flecha oscura #475569) y modo oscuro (flecha clara #cbd5e1).
     Soporta ejecución congelada con PyInstaller (sys._MEIPASS) y ejecución en script.
-    Si no existe en disco, se extrae del contenido embebido en Base64.
     """
+    suffix = "_dark" if dark_mode else ""
+    stroke_color = "#cbd5e1" if dark_mode else "#475569"
+
     # 1. PyInstaller frozen
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         bundle_dir = Path(sys._MEIPASS)
         for cand in [
+            bundle_dir / "assets" / f"chevron_down{suffix}.svg",
+            bundle_dir / "assets" / f"chevron_down{suffix}.png",
             bundle_dir / "assets" / "chevron_down.png",
-            bundle_dir / "assets" / "chevron_down.svg",
             bundle_dir / "chevron_down.png"
         ]:
             if cand.is_file() and cand.stat().st_size > 0:
@@ -83,25 +87,28 @@ def get_dropdown_arrow_path() -> Path:
 
     # 2. Assets local
     assets_dir = Path(__file__).parent.resolve() / "assets"
-    for cand in [assets_dir / "chevron_down.png", assets_dir / "chevron_down.svg"]:
-        if cand.is_file() and cand.stat().st_size > 0:
-            return cand
+    svg_cand = assets_dir / f"chevron_down{suffix}.svg"
+    if svg_cand.is_file() and svg_cand.stat().st_size > 0:
+        return svg_cand
 
-    # 3. Reconstruir a partir de Base64 embebido
+    # 3. Generar SVG vectorial de alta resolución en assets o tempdir
+    svg_content = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
+        f'<polyline points="6 9 12 15 18 9" fill="none" stroke="{stroke_color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'
+        f'</svg>'
+    )
     try:
         assets_dir.mkdir(parents=True, exist_ok=True)
-        arrow_path = assets_dir / "chevron_down.png"
-        arrow_data = base64.b64decode(CHEVRON_DOWN_PNG_BASE64)
-        arrow_path.write_bytes(arrow_data)
-        return arrow_path
+        svg_cand.write_text(svg_content, encoding="utf-8")
+        return svg_cand
     except Exception:
-        temp_png = Path(tempfile.gettempdir()) / "ros2_sim_launcher_chevron_down.png"
-        if not temp_png.is_file() or temp_png.stat().st_size == 0:
-            try:
-                temp_png.write_bytes(base64.b64decode(CHEVRON_DOWN_PNG_BASE64))
-            except Exception:
-                pass
-        return temp_png
+        temp_svg = Path(tempfile.gettempdir()) / f"ros2_sim_launcher_chevron_down{suffix}.svg"
+        try:
+            temp_svg.write_text(svg_content, encoding="utf-8")
+            return temp_svg
+        except Exception:
+            # Fallback a PNG base64 original si falla escritura SVG
+            return assets_dir / "chevron_down.png"
 
 
 from typing import Optional

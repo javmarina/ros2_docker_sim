@@ -585,7 +585,7 @@ class UpdateModalDialog(QtWidgets.QDialog):
 
         # 2. Notas de la versión (Changelog)
         lbl_notes = QtWidgets.QLabel("Novedades y notas de la versión:")
-        lbl_notes.setStyleSheet("font-size: 13px; font-weight: 600; color: #0f172a;")
+        lbl_notes.setObjectName("lblNotes")
         main_layout.addWidget(lbl_notes)
 
         self.txt_changelog = QtWidgets.QTextBrowser()
@@ -612,7 +612,6 @@ class UpdateModalDialog(QtWidgets.QDialog):
 
         self.btn_later = QtWidgets.QPushButton("Recordar más tarde")
         self.btn_later.setObjectName("btnLater")
-        self.btn_later.setIcon(get_themed_icon("window-close", color="#475569"))
         self.btn_later.setIconSize(QtCore.QSize(18, 18))
         self.btn_later.clicked.connect(self.reject)
         btn_layout.addWidget(self.btn_later)
@@ -627,89 +626,203 @@ class UpdateModalDialog(QtWidgets.QDialog):
         main_layout.addLayout(btn_layout)
 
     def _apply_styles(self):
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #f8fafc;
-                font-family: 'Segoe UI', system-ui, sans-serif;
-            }
-            #headerCard {
-                background-color: #ffffff;
-                border: 1px solid #e2e8f0;
-                border-radius: 8px;
-            }
-            #badgeLabel {
-                background-color: #dcfce7;
-                color: #15803d;
-                font-weight: 700;
-                font-size: 13px;
-                padding: 4px 10px;
-                border-radius: 6px;
-            }
-            #currentLabel {
-                color: #64748b;
-                font-size: 12px;
-                margin-left: 6px;
-            }
-            #dateLabel {
-                color: #94a3b8;
-                font-size: 11px;
-            }
-            #changelogBox {
-                background-color: #ffffff;
-                border: 1px solid #cbd5e1;
-                border-radius: 6px;
-                padding: 10px;
-                color: #334155;
-                font-size: 12px;
-                line-height: 1.4;
-            }
-            #progressBar {
-                border: 1px solid #cbd5e1;
-                border-radius: 6px;
-                text-align: center;
-                background-color: #ffffff;
-                height: 20px;
-                font-size: 11px;
-                font-weight: 600;
-                color: #0f172a;
-            }
-            #progressBar::chunk {
-                background-color: #16a34a;
-                border-radius: 5px;
-            }
-            #statusLabel {
-                color: #475569;
-                font-size: 12px;
-            }
-            #btnLater {
-                background-color: #e2e8f0;
-                color: #334155;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 12px;
-                font-weight: 600;
-            }
-            #btnLater:hover {
-                background-color: #cbd5e1;
-                color: #0f172a;
-            }
-            #btnUpdate {
-                background-color: #16a34a;
-                color: #ffffff;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 20px;
-                font-size: 12px;
-                font-weight: 700;
-            }
-            #btnUpdate:hover {
-                background-color: #15803d;
-            }
-            #btnUpdate:disabled {
-                background-color: #94a3b8;
-            }
-        """)
+        app = QtWidgets.QApplication.instance()
+        is_dark = False
+        if app:
+            hints = app.styleHints()
+            if hasattr(hints, "colorScheme"):
+                is_dark = (hints.colorScheme() == QtCore.Qt.ColorScheme.Dark)
+
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                val = ctypes.c_int(1 if is_dark else 0)
+                res = ctypes.windll.dwmapi.DwmSetWindowAttribute(int(self.winId()), 20, ctypes.byref(val), ctypes.sizeof(val))
+                if res != 0:
+                    ctypes.windll.dwmapi.DwmSetWindowAttribute(int(self.winId()), 19, ctypes.byref(val), ctypes.sizeof(val))
+            except Exception:
+                pass
+
+        btn_later_icon_col = "#cbd5e1" if is_dark else "#475569"
+        self.btn_later.setIcon(get_themed_icon("window-close", color=btn_later_icon_col))
+
+        if is_dark:
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: #0f172a;
+                    font-family: 'Segoe UI', system-ui, sans-serif;
+                }
+                #headerCard {
+                    background-color: #1e293b;
+                    border: 1px solid #334155;
+                    border-radius: 8px;
+                }
+                #badgeLabel {
+                    background-color: rgba(34, 197, 94, 0.2);
+                    color: #4ade80;
+                    font-weight: 700;
+                    font-size: 13px;
+                    padding: 4px 10px;
+                    border-radius: 6px;
+                }
+                #currentLabel {
+                    color: #cbd5e1;
+                    font-size: 12px;
+                    margin-left: 6px;
+                }
+                #dateLabel {
+                    color: #94a3b8;
+                    font-size: 11px;
+                }
+                #lblNotes {
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #f8fafc;
+                }
+                #changelogBox {
+                    background-color: #1e293b;
+                    border: 1px solid #334155;
+                    border-radius: 6px;
+                    padding: 10px;
+                    color: #f8fafc;
+                    font-size: 12px;
+                    line-height: 1.4;
+                }
+                #progressBar {
+                    border: 1px solid #334155;
+                    border-radius: 6px;
+                    text-align: center;
+                    background-color: #0f172a;
+                    height: 20px;
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: #f8fafc;
+                }
+                #progressBar::chunk {
+                    background-color: #16a34a;
+                    border-radius: 5px;
+                }
+                #statusLabel {
+                    color: #cbd5e1;
+                    font-size: 12px;
+                }
+                #btnLater {
+                    background-color: #334155;
+                    color: #f8fafc;
+                    border: 1px solid #475569;
+                    border-radius: 6px;
+                    padding: 8px 16px;
+                    font-size: 12px;
+                    font-weight: 600;
+                }
+                #btnLater:hover {
+                    background-color: #475569;
+                }
+                #btnUpdate {
+                    background-color: #16a34a;
+                    color: #ffffff;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 8px 18px;
+                    font-size: 12px;
+                    font-weight: 700;
+                }
+                #btnUpdate:hover {
+                    background-color: #15803d;
+                }
+                #btnUpdate:disabled {
+                    background-color: #94a3b8;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: #f8fafc;
+                    font-family: 'Segoe UI', system-ui, sans-serif;
+                }
+                #headerCard {
+                    background-color: #ffffff;
+                    border: 1px solid #e2e8f0;
+                    border-radius: 8px;
+                }
+                #badgeLabel {
+                    background-color: #dcfce7;
+                    color: #15803d;
+                    font-weight: 700;
+                    font-size: 13px;
+                    padding: 4px 10px;
+                    border-radius: 6px;
+                }
+                #currentLabel {
+                    color: #64748b;
+                    font-size: 12px;
+                    margin-left: 6px;
+                }
+                #dateLabel {
+                    color: #94a3b8;
+                    font-size: 11px;
+                }
+                #lblNotes {
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #0f172a;
+                }
+                #changelogBox {
+                    background-color: #ffffff;
+                    border: 1px solid #cbd5e1;
+                    border-radius: 6px;
+                    padding: 10px;
+                    color: #334155;
+                    font-size: 12px;
+                    line-height: 1.4;
+                }
+                #progressBar {
+                    border: 1px solid #cbd5e1;
+                    border-radius: 6px;
+                    text-align: center;
+                    background-color: #ffffff;
+                    height: 20px;
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: #0f172a;
+                }
+                #progressBar::chunk {
+                    background-color: #16a34a;
+                    border-radius: 5px;
+                }
+                #statusLabel {
+                    color: #475569;
+                    font-size: 12px;
+                }
+                #btnLater {
+                    background-color: #e2e8f0;
+                    color: #334155;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 8px 16px;
+                    font-size: 12px;
+                    font-weight: 600;
+                }
+                #btnLater:hover {
+                    background-color: #cbd5e1;
+                    color: #0f172a;
+                }
+                #btnUpdate {
+                    background-color: #16a34a;
+                    color: #ffffff;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 8px 18px;
+                    font-size: 12px;
+                    font-weight: 700;
+                }
+                #btnUpdate:hover {
+                    background-color: #15803d;
+                }
+                #btnUpdate:disabled {
+                    background-color: #94a3b8;
+                }
+            """)
 
     def _on_progress(self, pct: float, status_text: str):
         if pct < 0:
