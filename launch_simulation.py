@@ -386,6 +386,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     sig_docker_ready = QtCore.Signal()
     sig_docker_failed = QtCore.Signal(str)
     sig_docker_poll_progress = QtCore.Signal(int, int)  # (elapsed_seconds, max_seconds)
+    sig_container_status = QtCore.Signal(bool)  # (is_running)
     sig_log_received = QtCore.Signal(str)
 
     def __init__(self):
@@ -409,12 +410,20 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self._docker_poll_count = 0
         self._is_loading_preferences = True
 
+        # Control de estado del contenedor y ciclo de vida de la simulación
+        self._is_container_running: bool = False
+        self._is_launching_sim: bool = False
+        self._is_stopping_sim: bool = False
+        self._is_checking_container: bool = False
+        self._container_poll_timer: Optional[QtCore.QTimer] = None
+
         # Conexiones de señales Qt entre hilos
         self.sig_manual_update_result.connect(self._on_manual_update_result)
         self.sig_docker_status.connect(self._apply_docker_status)
         self.sig_docker_ready.connect(self._on_docker_ready)
         self.sig_docker_failed.connect(self._on_docker_start_failed)
         self.sig_docker_poll_progress.connect(self._on_docker_poll_progress)
+        self.sig_container_status.connect(self._on_container_status_changed)
         self.sig_log_received.connect(self._append_log_main_thread)
 
         self._is_dark = self.is_dark_mode()
@@ -422,6 +431,8 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self._build_ui()
         self._apply_theme(self._is_dark)
         self._load_saved_preferences()
+        self._update_action_buttons_state()
+        self._start_container_poll_timer()
         self._check_docker_live_status()
 
         # Escuchar cambios de tema en Windows en tiempo real
@@ -445,6 +456,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         if self._docker_state != new_state:
             self._docker_state = new_state
             self.sig_docker_state_changed.emit(new_state)
+            self._update_action_buttons_state()
 
     @property
     def _docker_running(self) -> bool:
@@ -765,6 +777,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             #btnLaunch:hover {{
                 background-color: #1d4ed8;
             }}
+            #btnLaunch:disabled {{
+                background-color: {p['bg_button']};
+                color: {p['text_muted']};
+                border: 1px solid {p['border']};
+            }}
             #btnTerminal {{
                 background-color: {p['btn_terminal_bg']};
                 color: #ffffff;
@@ -794,6 +811,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             }}
             #btnStop:hover {{
                 background-color: #b91c1c;
+            }}
+            #btnStop:disabled {{
+                background-color: {p['bg_button']};
+                color: {p['text_muted']};
+                border: 1px solid {p['border']};
             }}
             /* Progress Bar */
             QProgressBar {{
@@ -937,7 +959,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         # Los 4 botones de acción tienen exactamente el mismo tamaño (proporción 1:1:1:1 y altura 40px)
         self.btn_launch = QtWidgets.QPushButton("Iniciar simulación")
         self.btn_launch.setObjectName("btnLaunch")
-        self.btn_launch.setIcon(get_themed_icon("media-playback-start", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_MediaPlay))
+        self.btn_launch.setIcon(get_themed_icon("media-playback-start", color="#ffffff", disabled_color="#94a3b8", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_MediaPlay))
         self.btn_launch.setIconSize(QtCore.QSize(20, 20))
         self.btn_launch.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         self.btn_launch.clicked.connect(self._on_launch_simulation)
@@ -967,12 +989,14 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         self.btn_stop = QtWidgets.QPushButton("Detener contenedor")
         self.btn_stop.setObjectName("btnStop")
-        self.btn_stop.setIcon(get_themed_icon("media-playback-stop", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_MediaStop))
+        self.btn_stop.setIcon(get_themed_icon("media-playback-stop", color="#ffffff", disabled_color="#94a3b8", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_MediaStop))
         self.btn_stop.setIconSize(QtCore.QSize(20, 20))
-        self.btn_stop.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        self.btn_stop.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
         self.btn_stop.clicked.connect(self._on_stop_simulation)
         self.btn_stop.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
         self.btn_stop.setFixedHeight(40)
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.setToolTip("El contenedor no está en ejecución.")
         btn_row.addWidget(self.btn_stop, 1)
 
         c_layout.addLayout(btn_row)
@@ -1592,7 +1616,105 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self.ent_extra_args.setToolTip("")
 
         self._save_current_settings()
+        self._update_action_buttons_state()
 
+    def _start_container_poll_timer(self):
+        """Inicia temporizador de sondeo periódico para detectar el estado real del contenedor."""
+        if self._container_poll_timer is None:
+            self._container_poll_timer = QtCore.QTimer(self)
+            self._container_poll_timer.setInterval(2000)
+            self._container_poll_timer.timeout.connect(self._check_container_live_status)
+        if not self._container_poll_timer.isActive():
+            self._container_poll_timer.start()
+
+    def _check_container_live_status(self):
+        """Comprueba en segundo plano si el contenedor de simulación está corriendo."""
+        if self._docker_state != DockerState.RUNNING:
+            if self._is_container_running:
+                self.sig_container_status.emit(False)
+            return
+        if self._is_launching_sim or self._is_stopping_sim:
+            return
+        if self._is_checking_container:
+            return
+        self._is_checking_container = True
+
+        def _worker():
+            try:
+                running = DockerService.is_container_running(DEFAULT_CONTAINER_NAME, timeout=2.0)
+                self.sig_container_status.emit(running)
+            except Exception:
+                pass
+            finally:
+                self._is_checking_container = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    @QtCore.Slot(bool)
+    def _on_container_status_changed(self, running: bool):
+        """Manejador ejecutado en el hilo principal de Qt cuando cambia el estado del contenedor."""
+        changed = (self._is_container_running != running)
+        self._is_container_running = running
+        if changed:
+            if running:
+                self.lbl_progress.setText("Simulación en ejecución")
+            elif not self._is_launching_sim and not self._is_stopping_sim:
+                self.lbl_progress.setText("Listo")
+        self._update_action_buttons_state()
+
+    @QtCore.Slot()
+    def _update_action_buttons_state(self):
+        """
+        Garantiza que 'Iniciar simulación' esté deshabilitado si ya está en ejecución
+        o arrancando, y que 'Detener contenedor' esté habilitado únicamente cuando
+        el contenedor está en ejecución.
+        """
+        is_running = self._is_container_running
+        is_launching = self._is_launching_sim
+        is_stopping = self._is_stopping_sim
+        docker_starting = (self._docker_state == DockerState.STARTING)
+
+        # 'Iniciar simulación': deshabilitado si ya está en ejecución, iniciándose o si Docker está arrancando
+        can_launch = (not is_running) and (not is_launching) and (not docker_starting)
+        self.btn_launch.setEnabled(can_launch)
+        self.btn_launch.setCursor(
+            QtCore.Qt.CursorShape.PointingHandCursor if can_launch else QtCore.Qt.CursorShape.ArrowCursor
+        )
+
+        # 'Detener contenedor': habilitado ÚNICAMENTE si el contenedor está en ejecución
+        can_stop = is_running and (not is_stopping)
+        self.btn_stop.setEnabled(can_stop)
+        self.btn_stop.setCursor(
+            QtCore.Qt.CursorShape.PointingHandCursor if can_stop else QtCore.Qt.CursorShape.ArrowCursor
+        )
+
+        # Textos y tooltips contextuales
+        selected_sc_name = self.cbo_scenario.currentText()
+        is_container_only = (
+            "solo contenedor" in selected_sc_name.lower()
+            or "modo libre" in selected_sc_name.lower()
+        )
+
+        if is_running:
+            self.btn_launch.setToolTip("La simulación o contenedor ya se encuentra en ejecución.")
+            self.btn_stop.setToolTip("Detiene y elimina el contenedor Docker en ejecución.")
+        elif is_launching:
+            self.btn_launch.setToolTip("Iniciando contenedor o simulación...")
+            self.btn_stop.setToolTip("El contenedor se está iniciando...")
+        elif is_stopping:
+            self.btn_launch.setToolTip("Deteniendo contenedor...")
+            self.btn_stop.setToolTip("Deteniendo contenedor en ejecución...")
+        elif docker_starting:
+            self.btn_launch.setToolTip("Esperando a que Docker Desktop termine de arrancar...")
+            self.btn_stop.setToolTip("Docker Desktop se está iniciando...")
+        else:
+            self.btn_stop.setToolTip("El contenedor no está en ejecución.")
+            if is_container_only:
+                self.btn_launch.setToolTip(
+                    "Inicia el contenedor Docker con el workspace montado en modo libre (sin simulación ni roslaunch)"
+                )
+            else:
+                self.btn_launch.setToolTip("Inicia la simulación ROS 2 seleccionada")
 
     def _check_docker_live_status(self):
         if self._docker_state == DockerState.STARTING:
@@ -1636,6 +1758,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 QPushButton:hover {{ background-color: {btn_border}; }}
             """)
             self.btn_docker.setEnabled(True)
+            self.sig_container_status.emit(False)
         elif running:
             self._style_badge(self.lbl_docker_badge, f"● {daemon_msg}", "success")
             self.btn_docker.setText("Docker")
@@ -1643,6 +1766,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self.btn_docker.setToolTip("Docker activo y funcionando. Clic para volver a comprobar el estado.")
             self.btn_docker.setStyleSheet("")  # Regla QSS global #btnDocker
             self.btn_docker.setEnabled(True)
+            self._check_container_live_status()
         else:
             self._style_badge(self.lbl_docker_badge, "● Docker detenido", "warning")
             self.btn_docker.setText("Iniciar Docker")
@@ -1656,6 +1780,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 QPushButton:hover { background-color: #1d4ed8; }
             """)
             self.btn_docker.setEnabled(True)
+            self.sig_container_status.emit(False)
 
     def _on_docker_button_clicked(self):
         if self._docker_state == DockerState.STARTING:
@@ -1888,6 +2013,13 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self._show_warning_box("Docker", "Docker Desktop se está iniciando en este momento.\nPor favor espera a que finalice el arranque.")
             return
 
+        if self._is_container_running:
+            self._show_warning_box("Simulación", "La simulación o contenedor ya se encuentra en ejecución.\nDetén el contenedor actual antes de iniciar una nueva simulación.")
+            return
+
+        if self._is_launching_sim:
+            return
+
         image_name = COURSE_IMAGE_NAME
         running, err = DockerService.check_docker_running(timeout=3.0)
         if not running:
@@ -1916,80 +2048,117 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.tab_widget.setCurrentIndex(1)  # Tab Logs
         self._append_log("\n" + "="*50 + f"\n{title_msg}\n" + "="*50 + "\n")
 
+        self._is_launching_sim = True
+        self.lbl_progress.setText("Iniciando contenedor..." if is_container_only else "Iniciando simulación...")
+        self._update_action_buttons_state()
+
         def _worker():
-            if not DockerService.is_image_available(image_name):
-                self._append_log(f"Imagen '{image_name}' no encontrada localmente. Iniciando preparación...\n")
-                self._on_pull_or_build_image()
-                return
+            try:
+                if not DockerService.is_image_available(image_name):
+                    self._append_log(f"Imagen '{image_name}' no encontrada localmente. Iniciando preparación...\n")
+                    self._is_launching_sim = False
+                    QtCore.QMetaObject.invokeMethod(self, "_update_action_buttons_state", QtCore.Qt.ConnectionType.QueuedConnection)
+                    self._on_pull_or_build_image()
+                    return
 
-            DockerService.stop_container(DEFAULT_CONTAINER_NAME)
+                DockerService.stop_container(DEFAULT_CONTAINER_NAME)
 
-            robot_id = self.cbo_robot.currentData()
-            robot_profile = get_robot_by_id(robot_id) if robot_id else None
-            if not robot_profile:
-                selected_robot_name = self.cbo_robot.currentText()
-                robot_profile = get_robot_by_name(selected_robot_name) or get_all_robots()[0]
+                robot_id = self.cbo_robot.currentData()
+                robot_profile = get_robot_by_id(robot_id) if robot_id else None
+                if not robot_profile:
+                    selected_robot_name = self.cbo_robot.currentText()
+                    robot_profile = get_robot_by_name(selected_robot_name) or get_all_robots()[0]
 
-            selected_sc_name = self.cbo_scenario.currentText()
-            scenario_obj = robot_profile.get_scenario_by_name(selected_sc_name)
-            scenario_id = scenario_obj.id if scenario_obj else ("container_only" if is_container_only else "nav2")
+                selected_sc_name = self.cbo_scenario.currentText()
+                scenario_obj = robot_profile.get_scenario_by_name(selected_sc_name)
+                scenario_id = scenario_obj.id if scenario_obj else ("container_only" if is_container_only else "nav2")
 
-            world_name = self.cbo_world.currentText().strip() or "warehouse"
-            extra_args = self.ent_extra_args.text().strip()
-            force_rebuild = self.chk_force_rebuild.isChecked()
-            domain_id = self.ent_domain_id.text().strip() or "42"
-            ws_path = self.ent_ws_path.text().strip()
-            web_port = self.ent_web_port.text().strip() or str(DEFAULT_NOVNC_PORT)
+                world_name = self.cbo_world.currentText().strip() or "warehouse"
+                extra_args = self.ent_extra_args.text().strip()
+                force_rebuild = self.chk_force_rebuild.isChecked()
+                domain_id = self.ent_domain_id.text().strip() or "42"
+                ws_path = self.ent_ws_path.text().strip()
+                web_port = self.ent_web_port.text().strip() or str(DEFAULT_NOVNC_PORT)
 
-            ros_cmd = robot_profile.build_command(
-                scenario_id=scenario_id,
-                world_name=world_name,
-                extra_args=extra_args,
-                force_rebuild=force_rebuild
-            )
+                ros_cmd = robot_profile.build_command(
+                    scenario_id=scenario_id,
+                    world_name=world_name,
+                    extra_args=extra_args,
+                    force_rebuild=force_rebuild
+                )
 
-            docker_cmd = DockerService.build_docker_run_args(
-                image_name=image_name,
-                container_name=DEFAULT_CONTAINER_NAME,
-                ros_cmd=ros_cmd,
-                domain_id=domain_id,
-                robot_model=robot_profile.id,
-                ws_path=ws_path,
-                web_port=web_port
-            )
+                docker_cmd = DockerService.build_docker_run_args(
+                    image_name=image_name,
+                    container_name=DEFAULT_CONTAINER_NAME,
+                    ros_cmd=ros_cmd,
+                    domain_id=domain_id,
+                    robot_model=robot_profile.id,
+                    ws_path=ws_path,
+                    web_port=web_port
+                )
 
-            self._append_log(f"Comando Docker generado:\n{' '.join(docker_cmd)}\n\n")
+                self._append_log(f"Comando Docker generado:\n{' '.join(docker_cmd)}\n\n")
 
-            if scenario_id in ("container_only", "bash"):
-                self._append_log("Abriendo terminal nativa conectada al contenedor...\n")
-                QtCore.QTimer.singleShot(1500, self._on_open_terminal)
-            else:
-                QtCore.QTimer.singleShot(2500, self._open_web_gui)
+                if scenario_id in ("container_only", "bash"):
+                    self._append_log("Abriendo terminal nativa conectada al contenedor...\n")
+                    QtCore.QTimer.singleShot(1500, self._on_open_terminal)
+                else:
+                    QtCore.QTimer.singleShot(2500, self._open_web_gui)
 
-            self.active_sim_thread = ProcessRunnerThread(docker_cmd)
-            self.active_sim_thread.signals.line_received.connect(self._append_log)
-            self.active_sim_thread.signals.finished.connect(
-                lambda rc: self._append_log(f"\n[El proceso finalizó con código de salida {rc}]\n")
-            )
-            self.active_sim_thread.signals.error.connect(
-                lambda err: self._append_log(f"\n[Error durante la ejecución: {err}]\n")
-            )
-            self.active_sim_thread.start()
+                def _on_sim_finished(rc):
+                    self._append_log(f"\n[El proceso finalizó con código de salida {rc}]\n")
+                    self.sig_container_status.emit(False)
+
+                def _on_sim_error(err):
+                    self._append_log(f"\n[Error durante la ejecución: {err}]\n")
+                    self.sig_container_status.emit(False)
+
+                self.active_sim_thread = ProcessRunnerThread(docker_cmd)
+                self.active_sim_thread.signals.line_received.connect(self._append_log)
+                self.active_sim_thread.signals.finished.connect(_on_sim_finished)
+                self.active_sim_thread.signals.error.connect(_on_sim_error)
+                self.active_sim_thread.start()
+
+                self._is_launching_sim = False
+                self.sig_container_status.emit(True)
+            except Exception as e:
+                self._append_log(f"\n[Error durante el arranque: {e}]\n")
+                self._is_launching_sim = False
+                self.sig_container_status.emit(False)
 
         threading.Thread(target=_worker, daemon=True).start()
 
     def _on_stop_simulation(self):
+        if not self._is_container_running and not (self.active_sim_thread and self.active_sim_thread.isRunning()):
+            return
+        if self._is_stopping_sim:
+            return
+
         self.tab_widget.setCurrentIndex(1)  # Logs
+        self._is_stopping_sim = True
+        self.lbl_progress.setText("Deteniendo contenedor...")
+        self._update_action_buttons_state()
+
         def _worker():
-            self._append_log("\nDeteniendo contenedor de simulación...\n")
-            ok, msg = DockerService.stop_container(DEFAULT_CONTAINER_NAME)
-            self._append_log(f"{msg}\n")
-            if ok:
-                QtCore.QMetaObject.invokeMethod(
-                    self, "_show_info_box", QtCore.Qt.ConnectionType.QueuedConnection,
-                    QtCore.Q_ARG(str, "Simulación"),
-                    QtCore.Q_ARG(str, "Contenedor detenido correctamente.")
-                )
+            try:
+                self._append_log("\nDeteniendo contenedor de simulación...\n")
+                ok, msg = DockerService.stop_container(DEFAULT_CONTAINER_NAME)
+                self._append_log(f"{msg}\n")
+                if self.active_sim_thread and self.active_sim_thread.isRunning():
+                    self.active_sim_thread.terminate_process()
+                    self.active_sim_thread.wait(1000)
+                if ok:
+                    QtCore.QMetaObject.invokeMethod(
+                        self, "_show_info_box", QtCore.Qt.ConnectionType.QueuedConnection,
+                        QtCore.Q_ARG(str, "Simulación"),
+                        QtCore.Q_ARG(str, "Contenedor detenido correctamente.")
+                    )
+            except Exception as e:
+                self._append_log(f"[Error al detener contenedor: {e}]\n")
+            finally:
+                self._is_stopping_sim = False
+                self.sig_container_status.emit(False)
+
         threading.Thread(target=_worker, daemon=True).start()
 
     # --- Comandos Rápidos y Compilación ---
@@ -2311,6 +2480,8 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         # Detener temporizadores activos para evitar advertencias de Qt al cerrar
         if self._docker_poll_timer and self._docker_poll_timer.isActive():
             self._docker_poll_timer.stop()
+        if self._container_poll_timer and self._container_poll_timer.isActive():
+            self._container_poll_timer.stop()
 
         # Detener comandos secundarios si continúan activos
         if self.active_cmd_thread and self.active_cmd_thread.isRunning():

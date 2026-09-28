@@ -141,7 +141,12 @@ VECTOR_ICONS = {
 }
 
 
-def _render_vector_icon(key: str, normal_color: str, selected_color: Optional[str] = None) -> "QtGui.QIcon":
+def _render_vector_icon(
+    key: str,
+    normal_color: str,
+    selected_color: Optional[str] = None,
+    disabled_color: Optional[str] = None
+) -> "QtGui.QIcon":
     """
     Renderiza un SVG vectorial nítido a múltiples resoluciones (16..128px)
     para visualización perfecta en cualquier escala High-DPI.
@@ -178,6 +183,10 @@ def _render_vector_icon(key: str, normal_color: str, selected_color: Optional[st
             icon.addPixmap(pm_norm, QtGui.QIcon.Mode.Active, QtGui.QIcon.State.On)
             icon.addPixmap(pm_norm, QtGui.QIcon.Mode.Selected, QtGui.QIcon.State.Off)
             icon.addPixmap(pm_norm, QtGui.QIcon.Mode.Selected, QtGui.QIcon.State.On)
+        if disabled_color:
+            pm_dis = make_pixmap(disabled_color, sz)
+            icon.addPixmap(pm_dis, QtGui.QIcon.Mode.Disabled, QtGui.QIcon.State.Off)
+            icon.addPixmap(pm_dis, QtGui.QIcon.Mode.Disabled, QtGui.QIcon.State.On)
 
     return icon
 
@@ -198,6 +207,7 @@ def get_themed_icon(
     name: str,
     color: Optional[str] = None,
     selected_color: Optional[str] = None,
+    disabled_color: Optional[str] = None,
     fallback_sp: Optional["QtWidgets.QStyle.StandardPixmap"] = None
 ) -> "QtGui.QIcon":
     """
@@ -208,7 +218,7 @@ def get_themed_icon(
     """
     if name in VECTOR_ICONS:
         normal_col = color if color else "#334155"
-        return _render_vector_icon(name, normal_col, selected_color)
+        return _render_vector_icon(name, normal_col, selected_color, disabled_color)
 
     from PySide6 import QtGui, QtWidgets
 
@@ -220,7 +230,7 @@ def get_themed_icon(
                 return app.style().standardIcon(fallback_sp)
         return QtGui.QIcon()
 
-    if not color and not selected_color:
+    if not color and not selected_color and not disabled_color:
         return base
 
     icon = QtGui.QIcon()
@@ -239,6 +249,10 @@ def get_themed_icon(
             sel_pm = _tint_pixmap(pm, selected_color)
             icon.addPixmap(sel_pm, QtGui.QIcon.Mode.Selected)
             icon.addPixmap(sel_pm, QtGui.QIcon.Mode.Active)
+
+        if disabled_color:
+            dis_pm = _tint_pixmap(pm, disabled_color)
+            icon.addPixmap(dis_pm, QtGui.QIcon.Mode.Disabled)
 
     return icon
 
