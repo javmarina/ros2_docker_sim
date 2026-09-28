@@ -97,7 +97,7 @@ class DockerService:
                     return
 
     @classmethod
-    def check_docker_installed(cls) -> Tuple[bool, str]:
+    def check_docker_installed(cls, timeout: float = 4.0) -> Tuple[bool, str]:
         """Comprueba si el binario de docker está instalado y en el PATH."""
         cls.ensure_docker_in_path()
         try:
@@ -107,16 +107,21 @@ class DockerService:
                 stderr=subprocess.PIPE,
                 text=True,
                 check=False,
+                timeout=timeout,
                 creationflags=WIN32_NO_WINDOW
             )
             if res.returncode == 0:
                 return True, res.stdout.strip()
             return False, "Docker no está instalado o no se encuentra en el PATH."
+        except subprocess.TimeoutExpired:
+            return False, "Tiempo de espera agotado al verificar Docker en el PATH."
         except FileNotFoundError:
             return False, "Docker no encontrado en el PATH del sistema."
+        except Exception as e:
+            return False, str(e)
 
     @classmethod
-    def check_docker_running(cls) -> Tuple[bool, str]:
+    def check_docker_running(cls, timeout: float = 4.0) -> Tuple[bool, str]:
         """Comprueba si el servicio/daemon de Docker está activo."""
         cls.ensure_docker_in_path()
         try:
@@ -126,6 +131,7 @@ class DockerService:
                 stderr=subprocess.PIPE,
                 text=True,
                 check=False,
+                timeout=timeout,
                 creationflags=WIN32_NO_WINDOW
             )
             if res.returncode == 0:
@@ -134,6 +140,8 @@ class DockerService:
             if not err_msg:
                 err_msg = "Docker Desktop no está en ejecución."
             return False, err_msg
+        except subprocess.TimeoutExpired:
+            return False, "Tiempo de espera agotado al conectar con el daemon de Docker."
         except Exception as e:
             return False, str(e)
 
@@ -202,7 +210,7 @@ class DockerService:
         Inicia Docker Desktop en el sistema anfitrión si no está corriendo.
         Retorna (éxito, mensaje).
         """
-        running, _ = cls.check_docker_running()
+        running, _ = cls.check_docker_running(timeout=2.0)
         if running:
             return True, "Docker Desktop ya se encuentra en ejecución."
 
@@ -222,11 +230,13 @@ class DockerService:
                     os.startfile(str(exe_path))
                 else:
                     subprocess.Popen([str(exe_path)], close_fds=True)
+                logger.info("Comando de arranque de Docker Desktop enviado al sistema.")
                 return True, "Arrancando Docker Desktop en Windows..."
             except Exception as e:
                 logger.warning("Fallo al iniciar con startfile, intentando con Popen: %s", e)
                 try:
                     subprocess.Popen([str(exe_path)], close_fds=True)
+                    logger.info("Comando de arranque de Docker Desktop enviado vía Popen.")
                     return True, "Arrancando Docker Desktop en Windows..."
                 except Exception as e2:
                     logger.error("Error al arrancar Docker Desktop: %s", e2, exc_info=True)
@@ -249,7 +259,7 @@ class DockerService:
 
 
     @staticmethod
-    def is_container_running(container_name: str = DEFAULT_CONTAINER_NAME) -> bool:
+    def is_container_running(container_name: str = DEFAULT_CONTAINER_NAME, timeout: float = 3.0) -> bool:
         """Verifica si el contenedor especificado está actualmente en ejecución."""
         try:
             res = subprocess.run(
@@ -258,6 +268,7 @@ class DockerService:
                 stderr=subprocess.PIPE,
                 text=True,
                 check=False,
+                timeout=timeout,
                 creationflags=WIN32_NO_WINDOW
             )
             return bool(res.stdout.strip())
@@ -265,7 +276,7 @@ class DockerService:
             return False
 
     @staticmethod
-    def is_image_available(image_name: str = COURSE_IMAGE_NAME) -> bool:
+    def is_image_available(image_name: str = COURSE_IMAGE_NAME, timeout: float = 5.0) -> bool:
         """Verifica si la imagen existe localmente en Docker."""
         try:
             res = subprocess.run(
@@ -274,6 +285,7 @@ class DockerService:
                 stderr=subprocess.PIPE,
                 text=True,
                 check=False,
+                timeout=timeout,
                 creationflags=WIN32_NO_WINDOW
             )
             return res.returncode == 0
@@ -281,7 +293,7 @@ class DockerService:
             return False
 
     @staticmethod
-    def stop_container(container_name: str = DEFAULT_CONTAINER_NAME) -> Tuple[bool, str]:
+    def stop_container(container_name: str = DEFAULT_CONTAINER_NAME, timeout: float = 15.0) -> Tuple[bool, str]:
         """Detiene y elimina de forma inmediata el contenedor para evitar bloqueos."""
         logger.info("Deteniendo contenedor '%s'...", container_name)
         try:
@@ -291,6 +303,7 @@ class DockerService:
                 stderr=subprocess.PIPE,
                 text=True,
                 check=False,
+                timeout=timeout,
                 creationflags=WIN32_NO_WINDOW
             )
             if res.returncode == 0:
@@ -303,7 +316,7 @@ class DockerService:
             return False, str(e)
 
     @staticmethod
-    def clean_build_volumes() -> Tuple[bool, str]:
+    def clean_build_volumes(timeout: float = 10.0) -> Tuple[bool, str]:
         """Elimina los volúmenes persistentes de caché de compilación de colcon."""
         logger.info("Eliminando volúmenes de caché ros2_jazzy_*...")
         try:
@@ -314,6 +327,7 @@ class DockerService:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     check=False,
+                    timeout=timeout,
                     creationflags=WIN32_NO_WINDOW
                 )
             logger.debug("Volúmenes de caché eliminados.")

@@ -9,6 +9,7 @@ import sys
 import logging
 import platform
 import datetime
+import time
 import traceback
 import urllib.parse
 import webbrowser
@@ -381,6 +382,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     sig_docker_status = QtCore.Signal(bool, bool, str)  # (installed, running, daemon_msg)
     sig_docker_ready = QtCore.Signal()
     sig_docker_failed = QtCore.Signal(str)
+    sig_docker_poll_progress = QtCore.Signal(int, int)  # (elapsed_seconds, max_seconds)
     sig_log_received = QtCore.Signal(str)
 
     def __init__(self):
@@ -409,6 +411,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.sig_docker_status.connect(self._apply_docker_status)
         self.sig_docker_ready.connect(self._on_docker_ready)
         self.sig_docker_failed.connect(self._on_docker_start_failed)
+        self.sig_docker_poll_progress.connect(self._on_docker_poll_progress)
         self.sig_log_received.connect(self._append_log_main_thread)
 
         self._is_dark = self.is_dark_mode()
@@ -1641,32 +1644,41 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             ok, msg = DockerService.start_docker_desktop()
             if not ok:
                 self.sig_docker_failed.emit(msg)
-            else:
-                QtCore.QMetaObject.invokeMethod(
-                    self, "_begin_docker_polling", QtCore.Qt.ConnectionType.QueuedConnection
-                )
+                return
+
+            max_seconds = 90
+            poll_interval = 2.0
+            elapsed = 0.0
+
+            # Pausa breve inicial antes de comenzar las consultas al daemon
+            time.sleep(3.0)
+            elapsed += 3.0
+
+            while elapsed < max_seconds:
+                if not self._is_starting_docker:
+                    return
+
+                # Sondeo en segundo plano con timeout controlado para mantener la app fluida
+                running, _ = DockerService.check_docker_running(timeout=2.5)
+                if running:
+                    self.sig_docker_ready.emit()
+                    return
+
+                self.sig_docker_poll_progress.emit(int(elapsed), max_seconds)
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+
+            self.sig_docker_failed.emit(
+                f"Tiempo de espera agotado al arrancar Docker Desktop ({max_seconds}s).\n"
+                "Por favor comprueba si Docker Desktop se abrió en tu sistema y revisa su estado."
+            )
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    @QtCore.Slot()
-    def _begin_docker_polling(self):
-        self._docker_poll_count = 0
-        if self._docker_poll_timer is None:
-            self._docker_poll_timer = QtCore.QTimer(self)
-            self._docker_poll_timer.timeout.connect(self._poll_docker_tick)
-        self._docker_poll_timer.start(2500)
-
-    def _poll_docker_tick(self):
-        self._docker_poll_count += 1
-        running, _ = DockerService.check_docker_running()
-        if running:
-            self._docker_poll_timer.stop()
-            self._is_starting_docker = False
-            self.sig_docker_ready.emit()
-        elif self._docker_poll_count >= 24:
-            self._docker_poll_timer.stop()
-            self._is_starting_docker = False
-            self.sig_docker_failed.emit("Tiempo de espera agotado al arrancar Docker Desktop (60s).")
+    @QtCore.Slot(int, int)
+    def _on_docker_poll_progress(self, elapsed: int, max_s: int):
+        self._style_badge(self.lbl_docker_badge, f"● Arrancando Docker ({elapsed}s)...", "info")
+        self.lbl_progress.setText(f"Arrancando Docker Desktop ({elapsed}s / {max_s}s)...")
 
     @QtCore.Slot()
     def _on_docker_ready(self):
@@ -1775,8 +1787,12 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         webbrowser.open(url)
 
     def _on_open_terminal(self):
+        if self._is_starting_docker:
+            self._show_warning_box("Docker", "Docker Desktop se está iniciando en este momento.\nPor favor espera a que el servicio esté listo.")
+            return
+
         def _worker():
-            if not DockerService.is_container_running(DEFAULT_CONTAINER_NAME):
+            if not DockerService.is_container_running(DEFAULT_CONTAINER_NAME, timeout=3.0):
                 QtCore.QMetaObject.invokeMethod(
                     self, "_prompt_start_terminal_container", QtCore.Qt.ConnectionType.QueuedConnection
                 )
@@ -1814,8 +1830,12 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self._on_launch_simulation()
 
     def _on_launch_simulation(self):
+        if self._is_starting_docker:
+            self._show_warning_box("Docker", "Docker Desktop se está iniciando en este momento.\nPor favor espera a que finalice el arranque.")
+            return
+
         image_name = COURSE_IMAGE_NAME
-        running, err = DockerService.check_docker_running()
+        running, err = DockerService.check_docker_running(timeout=3.0)
         if not running:
             ans = QtWidgets.QMessageBox.question(
                 self,
@@ -1952,8 +1972,12 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self._execute_quick_command(cmd)
 
     def _on_compile_workspace(self):
+        if self._is_starting_docker:
+            self._show_warning_box("Docker", "Docker Desktop se está iniciando en este momento.\nPor favor espera a que el servicio esté listo.")
+            return
+
         image_name = COURSE_IMAGE_NAME
-        running, err = DockerService.check_docker_running()
+        running, err = DockerService.check_docker_running(timeout=3.0)
         if not running:
             QtWidgets.QMessageBox.critical(self, "Docker", f"Docker no está en ejecución:\n\n{err}")
             return
@@ -1995,6 +2019,10 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Compilación", f"La compilación terminó con código de error {rc}.")
 
     def _on_clean_build_cache(self):
+        if self._is_starting_docker:
+            self._show_warning_box("Docker", "Docker Desktop se está iniciando en este momento.\nPor favor espera a que el servicio esté listo.")
+            return
+
         answer = QtWidgets.QMessageBox.question(
             self,
             "Limpiar Caché",
@@ -2004,11 +2032,19 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         if answer != QtWidgets.QMessageBox.StandardButton.Yes:
             return
 
-        self._append_log("\nLimpiando volúmenes de caché...\n")
-        ok, msg = DockerService.clean_build_volumes()
-        self._append_log(f"{msg}\n")
-        if ok:
-            QtWidgets.QMessageBox.information(self, "Caché", msg)
+        self._append_log("\nLimpiando volúmenes de caché en segundo plano...\n")
+
+        def _worker():
+            ok, msg = DockerService.clean_build_volumes()
+            self._append_log(f"{msg}\n")
+            if ok:
+                QtCore.QMetaObject.invokeMethod(
+                    self, "_show_info_box", QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.Q_ARG(str, "Caché"),
+                    QtCore.Q_ARG(str, msg)
+                )
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _on_pull_or_build_image(self):
         image_name = COURSE_IMAGE_NAME
@@ -2115,6 +2151,9 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.warning(self, title, text)
 
     def closeEvent(self, event: QtGui.QCloseEvent):
+        # Cancelar cualquier sondeo activo de Docker en segundo plano
+        self._is_starting_docker = False
+
         # Detener temporizadores activos para evitar advertencias de Qt al cerrar
         if self._docker_poll_timer and self._docker_poll_timer.isActive():
             self._docker_poll_timer.stop()
