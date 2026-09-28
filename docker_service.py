@@ -14,8 +14,28 @@ import platform
 import subprocess
 from pathlib import Path
 from typing import Tuple, Callable, Optional, List
+from enum import Enum
 
 logger = logging.getLogger("docker_service")
+
+class DockerState(Enum):
+    """Estados del ciclo de vida del servicio de Docker."""
+    NOT_RUNNING = "NOT_RUNNING"
+    STARTING = "STARTING"
+    RUNNING = "RUNNING"
+
+    @property
+    def is_running(self) -> bool:
+        return self == DockerState.RUNNING
+
+    @property
+    def is_starting(self) -> bool:
+        return self == DockerState.STARTING
+
+    @property
+    def is_not_running(self) -> bool:
+        return self == DockerState.NOT_RUNNING
+
 
 DEFAULT_CONTAINER_NAME = "ros2_jazzy_nav_sim"
 COURSE_IMAGE_NAME = "ros2-jazzy-nav-course:latest"
@@ -144,6 +164,23 @@ class DockerService:
             return False, "Tiempo de espera agotado al conectar con el daemon de Docker."
         except Exception as e:
             return False, str(e)
+
+    @classmethod
+    def is_docker_installed(cls, timeout: float = 4.0) -> bool:
+        """Comprueba de forma rápida si Docker está instalado."""
+        installed, _ = cls.check_docker_installed(timeout=timeout)
+        return installed
+
+    @classmethod
+    def is_docker_running(cls, timeout: float = 4.0) -> bool:
+        """Comprueba de forma rápida si el daemon de Docker está en ejecución."""
+        running, _ = cls.check_docker_running(timeout=timeout)
+        return running
+
+    @classmethod
+    def get_docker_state(cls, timeout: float = 4.0) -> DockerState:
+        """Determina el estado actual de Docker como DockerState enum."""
+        return DockerState.RUNNING if cls.is_docker_running(timeout=timeout) else DockerState.NOT_RUNNING
 
     @classmethod
     def find_docker_desktop_path(cls) -> Optional[Path]:

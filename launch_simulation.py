@@ -48,6 +48,7 @@ from robot_registry import (
 )
 from docker_service import (
     DockerService,
+    DockerState,
     COURSE_IMAGE_NAME,
     DEFAULT_CONTAINER_NAME,
     DEFAULT_NOVNC_PORT
@@ -247,7 +248,7 @@ Este entorno ejecuta **ROS 2 Jazzy**, **Gazebo Sim** y **Navigation2 (Nav2)** de
   **`/ros2_ws/src`**
 - Puedes editar tus paquetes y nodos de ROS 2 en Windows usando tu editor preferido (VS Code, etc.).
 - Cualquier cambio en Windows se sincroniza instantáneamente con Docker.
-- Para compilar tus paquetes, pulsa **"Compilar Workspace"** o escribe `colcon build` en la terminal.
+- Para compilar tus paquetes, pulsa **"Compilar Workspace"** o escribe `colcon build` en la terminal. Para limpiar una compilación anterior y reconstruir desde cero, pulsa **"Limpiar compilación"** en la pestaña de Comandos rápidos.
 
 ---
 
@@ -380,6 +381,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
     sig_manual_update_result = QtCore.Signal(bool, object, str)
     sig_docker_status = QtCore.Signal(bool, bool, str)  # (installed, running, daemon_msg)
+    sig_docker_state_changed = QtCore.Signal(object)  # (DockerState)
     sig_docker_ready = QtCore.Signal()
     sig_docker_failed = QtCore.Signal(str)
     sig_docker_poll_progress = QtCore.Signal(int, int)  # (elapsed_seconds, max_seconds)
@@ -400,9 +402,8 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.ansi_parser = AnsiColorParser()
         self.latest_update_info: Optional[Dict] = None
 
-        # Control de estado de Docker Desktop
-        self._docker_running = False
-        self._is_starting_docker = False
+        # Control de estado de Docker Desktop con Enum de tres estados (NOT_RUNNING, STARTING, RUNNING)
+        self._docker_state: DockerState = DockerState.NOT_RUNNING
         self._docker_poll_timer: Optional[QtCore.QTimer] = None
         self._docker_poll_count = 0
         self._is_loading_preferences = True
@@ -432,6 +433,25 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             QtCore.QTimer.singleShot(1000, lambda: self._on_manual_check_updates(force=True))
         else:
             QtCore.QTimer.singleShot(1500, self._check_for_updates_background)
+
+    @property
+    def docker_state(self) -> DockerState:
+        """Devuelve el estado actual de Docker (DockerState enum)."""
+        return self._docker_state
+
+    def _set_docker_state(self, new_state: DockerState):
+        """Actualiza el estado de Docker y emite la señal de cambio de estado."""
+        if self._docker_state != new_state:
+            self._docker_state = new_state
+            self.sig_docker_state_changed.emit(new_state)
+
+    @property
+    def _docker_running(self) -> bool:
+        return self._docker_state == DockerState.RUNNING
+
+    @property
+    def _is_starting_docker(self) -> bool:
+        return self._docker_state == DockerState.STARTING
 
     def _setup_window_icon(self):
         try:
@@ -525,7 +545,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         if hasattr(self, "btn_header_update") and not self.latest_update_info:
             self.btn_header_update.setIcon(get_themed_icon("system-software-update", color=col, fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_ArrowUp))
         if hasattr(self, "btn_docker"):
-            if getattr(self, "_docker_running", False):
+            if self._docker_state == DockerState.RUNNING:
                 self.btn_docker.setIcon(get_themed_icon("view-refresh", color=col, fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
 
         # Botones de herramientas en pestañas
@@ -1574,7 +1594,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
 
     def _check_docker_live_status(self):
-        if self._is_starting_docker:
+        if self._docker_state == DockerState.STARTING:
             return
 
         self._style_badge(self.lbl_docker_badge, "● Comprobando Docker...", "warning")
@@ -1591,10 +1611,10 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
     @QtCore.Slot(bool, bool, str)
     def _apply_docker_status(self, installed: bool, running: bool, daemon_msg: str):
-        if self._is_starting_docker:
+        if self._docker_state == DockerState.STARTING:
             return
 
-        self._docker_running = running
+        self._set_docker_state(DockerState.RUNNING if running else DockerState.NOT_RUNNING)
         self._last_docker_status = (installed, running, daemon_msg)
         is_dark = getattr(self, "_is_dark", False)
         p = THEME_PALETTES["dark" if is_dark else "light"]
@@ -1637,7 +1657,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self.btn_docker.setEnabled(True)
 
     def _on_docker_button_clicked(self):
-        if self._is_starting_docker:
+        if self._docker_state == DockerState.STARTING:
             return
 
         installed, _ = DockerService.check_docker_installed()
@@ -1653,16 +1673,16 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 webbrowser.open("https://www.docker.com/products/docker-desktop/")
             return
 
-        if self._docker_running:
+        if self._docker_state == DockerState.RUNNING:
             self._check_docker_live_status()
         else:
             self._start_docker_desktop()
 
     def _start_docker_desktop(self):
-        if self._is_starting_docker:
+        if self._docker_state == DockerState.STARTING:
             return
 
-        self._is_starting_docker = True
+        self._set_docker_state(DockerState.STARTING)
         is_dark = getattr(self, "_is_dark", False)
         self._style_badge(self.lbl_docker_badge, "● Arrancando Docker...", "info")
         self.btn_docker.setText("Arrancando...")
@@ -1688,7 +1708,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             elapsed += 3.0
 
             while elapsed < max_seconds:
-                if not self._is_starting_docker:
+                if self._docker_state != DockerState.STARTING:
                     return
 
                 # Sondeo en segundo plano con timeout controlado para mantener la app fluida
@@ -1715,14 +1735,14 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
     @QtCore.Slot()
     def _on_docker_ready(self):
-        self._is_starting_docker = False
+        self._set_docker_state(DockerState.RUNNING)
         self._append_log("[Docker] Docker Desktop ha arrancado correctamente.\n")
         self.lbl_progress.setText("Docker listo")
         self._check_docker_live_status()
 
     @QtCore.Slot(str)
     def _on_docker_start_failed(self, err_msg: str):
-        self._is_starting_docker = False
+        self._set_docker_state(DockerState.NOT_RUNNING)
         self._append_log(f"[Error Docker] No se pudo arrancar Docker Desktop: {err_msg}\n")
         self.lbl_progress.setText("Error al arrancar Docker")
         self._check_docker_live_status()
@@ -1820,7 +1840,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         webbrowser.open(url)
 
     def _on_open_terminal(self):
-        if self._is_starting_docker:
+        if self._docker_state == DockerState.STARTING:
             self._show_warning_box("Docker", "Docker Desktop se está iniciando en este momento.\nPor favor espera a que el servicio esté listo.")
             return
 
@@ -1863,7 +1883,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self._on_launch_simulation()
 
     def _on_launch_simulation(self):
-        if self._is_starting_docker:
+        if self._docker_state == DockerState.STARTING:
             self._show_warning_box("Docker", "Docker Desktop se está iniciando en este momento.\nPor favor espera a que finalice el arranque.")
             return
 
@@ -2008,7 +2028,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self._execute_quick_command(cmd)
 
     def _on_compile_workspace(self):
-        if self._is_starting_docker:
+        if self._docker_state == DockerState.STARTING:
             self._show_warning_box("Docker", "Docker Desktop se está iniciando en este momento.\nPor favor espera a que el servicio esté listo.")
             return
 
@@ -2055,7 +2075,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Compilación", f"La compilación terminó con código de error {rc}.")
 
     def _on_clean_build_cache(self):
-        if self._is_starting_docker:
+        if self._docker_state == DockerState.STARTING:
             self._show_warning_box("Docker", "Docker Desktop se está iniciando en este momento.\nPor favor espera a que el servicio esté listo.")
             return
 
@@ -2188,7 +2208,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
     def closeEvent(self, event: QtGui.QCloseEvent):
         # Cancelar cualquier sondeo activo de Docker en segundo plano
-        self._is_starting_docker = False
+        self._set_docker_state(DockerState.NOT_RUNNING)
 
         # Guardar configuración actual antes de salir
         self._save_current_settings()
