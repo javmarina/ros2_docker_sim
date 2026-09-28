@@ -62,14 +62,6 @@ def _build_env_prefix(force_rebuild: bool) -> str:
     force_val = "1" if force_rebuild else "0"
     return (
         "source /opt/ros/jazzy/setup.bash && "
-        "if [ -d /ros2_ws/src/tiago_robot-humble-devel ]; then "
-        f'  if [ "{force_val}" = "1" ] || [ ! -f /ros2_ws/install/setup.bash ]; then '
-        '    echo "=== [1/2] Compilando paquetes del workspace con colcon ===" && '
-        "    cd /ros2_ws && colcon build --symlink-install --packages-select tiago_description tiago_bringup tiago_controller_configuration tiago_robot; "
-        "  else "
-        '    echo "=== [1/2] Reutilizando compilación en caché (arranque instantáneo) ==="; '
-        "  fi; "
-        "fi && "
         "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi"
     )
 
@@ -101,36 +93,6 @@ def _build_turtlebot4_command(scenario_id: str, world_name: str, extra_args: str
         return f"{env} && ros2 launch turtlebot4_gz_bringup turtlebot4_gz.launch.py world:={world_name} {args}".strip()
     elif scenario_id == "rviz2":
         return f"{env} && ros2 launch turtlebot4_viz view_robot.launch.py"
-    elif scenario_id == "teleop":
-        return f"{env} && ros2 run teleop_twist_keyboard teleop_twist_keyboard"
-    else:  # "container_only", "bash"
-        return _build_container_only_command()
-
-
-def _build_tiago_command(scenario_id: str, world_name: str, extra_args: str, force_rebuild: bool) -> str:
-    env = _build_env_prefix(force_rebuild)
-    args = extra_args.strip()
-
-    if scenario_id == "nav2":
-        return (
-            f"{env} && "
-            f"ros2 launch tiago_description robot_state_publisher.launch.py {args} & "
-            f"sleep 3 && "
-            f"ros2 launch nav2_bringup navigation_launch.py use_sim_time:=true {args} & "
-            f"sleep 2 && rviz2"
-        )
-    elif scenario_id == "slam":
-        return (
-            f"{env} && "
-            f"ros2 launch tiago_description robot_state_publisher.launch.py {args} & "
-            f"sleep 3 && "
-            f"ros2 launch slam_toolbox online_async_launch.py use_sim_time:=true & "
-            f"sleep 2 && rviz2"
-        )
-    elif scenario_id == "sim_only":
-        return f"{env} && ros2 launch tiago_description show.launch.py {args}"
-    elif scenario_id == "rviz2":
-        return f"{env} && rviz2"
     elif scenario_id == "teleop":
         return f"{env} && ros2 run teleop_twist_keyboard teleop_twist_keyboard"
     else:  # "container_only", "bash"
@@ -189,22 +151,6 @@ STANDARD_SCENARIOS = [
 
 # --- Registro de Robots Disponibles ---
 ROBOT_REGISTRY: Dict[str, RobotProfile] = {
-    "turtlebot4": RobotProfile(
-        id="turtlebot4",
-        name="TurtleBot 4 (iRobot Create3)",
-        description="Plataforma diferencial estándar de la asignatura con cámara OAK-D y LiDAR 2D.",
-        supported_worlds=["warehouse", "depot", "maze", "empty"],
-        scenarios=STANDARD_SCENARIOS,
-        command_builder=_build_turtlebot4_command
-    ),
-    "tiago": RobotProfile(
-        id="tiago",
-        name="PAL Robotics TIAGo",
-        description="Robot móvil de servicio con base móvil diferencial, columna telescópica y sensores.",
-        supported_worlds=["warehouse", "depot", "maze", "empty"],
-        scenarios=STANDARD_SCENARIOS,
-        command_builder=_build_tiago_command
-    ),
     "generic": RobotProfile(
         id="base",
         name="Entorno base ROS 2 (Sin robot específico)",
@@ -228,6 +174,14 @@ ROBOT_REGISTRY: Dict[str, RobotProfile] = {
             ),
         ],
         command_builder=_build_generic_command
+    ),
+    "turtlebot4": RobotProfile(
+        id="turtlebot4",
+        name="TurtleBot 4 (iRobot Create3)",
+        description="Plataforma diferencial estándar de la asignatura con cámara OAK-D y LiDAR 2D.",
+        supported_worlds=["warehouse", "depot", "maze", "empty"],
+        scenarios=STANDARD_SCENARIOS,
+        command_builder=_build_turtlebot4_command
     )
 }
 
@@ -250,7 +204,6 @@ def get_robot_by_name(name_str: str) -> Optional[RobotProfile]:
         if (
             r.name == name_str
             or r.id in name_str.lower()
-            or ("tiago" in name_str.lower() and r.id == "tiago")
             or ("base" in name_str.lower() and r.id == "base")
             or ("sin robot" in name_str.lower() and r.id == "base")
         ):

@@ -165,7 +165,7 @@ FROM osrf/ros:jazzy-desktop-full
 ENV DEBIAN_FRONTEND=noninteractive
 ENV RCUTILS_COLORIZED_OUTPUT=1
 
-# Install Navigation2, SLAM Toolbox, TurtleBot4, TIAGo dependencies, and Gazebo (ros_gz)
+# Install Navigation2, SLAM Toolbox, TurtleBot4 dependencies, and Gazebo (ros_gz)
 RUN echo "=== [1/3] Actualizando repositorios APT ===" && \
     apt-get update && \
     echo "=== [2/3] Instalando dependencias de ROS 2 y utilidades del sistema ===" && \

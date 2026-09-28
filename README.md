@@ -50,7 +50,7 @@ El repositorio incluye un flujo de trabajo de **GitHub Actions** (`.github/workf
 ---
 
 ## 📁 Características del Launcher
-- **Interfaz moderna PySide6**: Diseño estilo Slate con tarjetas, selección de robots (TurtleBot 4, PAL Robotics TIAGo), mundos y escenarios de simulación.
+- **Interfaz moderna PySide6**: Diseño estilo Slate con tarjetas, selección de robots (TurtleBot 4), mundos y escenarios de simulación.
 - **Espacio de Trabajo Persistente**: Monta automáticamente la carpeta de desarrollo de Windows en `/ros2_ws/src` dentro del contenedor con validación visual.
 - **Consola con Colores ANSI**: Salida de logs de ROS 2 en vivo con auto-scroll inteligente y soporte completo de secuencias de escape ANSI.
 - **Terminal Docker Nativa**: Abre Windows Terminal o PowerShell interactivo conectado al contenedor con el entorno ROS 2 listo para teleoperación.
