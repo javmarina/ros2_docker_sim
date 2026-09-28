@@ -556,8 +556,8 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             ("btn_clear", "edit-clear", QtWidgets.QStyle.StandardPixmap.SP_DialogResetButton),
             ("btn_topics", "emblem-documents", QtWidgets.QStyle.StandardPixmap.SP_FileDialogDetailedView),
             ("btn_nodes", "network-wired", QtWidgets.QStyle.StandardPixmap.SP_FileDialogContentsView),
-            ("btn_topics_info", "accessories-character-map", QtWidgets.QStyle.StandardPixmap.SP_FileDialogInfoView),
             ("btn_compile", "applications-development", QtWidgets.QStyle.StandardPixmap.SP_CommandLink),
+            ("btn_clean_compile", "edit-clear", QtWidgets.QStyle.StandardPixmap.SP_DialogResetButton),
             ("btn_prep_image", "view-refresh", QtWidgets.QStyle.StandardPixmap.SP_BrowserReload),
             ("btn_clean_cache", "user-trash", QtWidgets.QStyle.StandardPixmap.SP_TrashIcon),
             ("btn_check_updates", "system-software-update", QtWidgets.QStyle.StandardPixmap.SP_BrowserReload),
@@ -1218,20 +1218,15 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.btn_nodes.clicked.connect(lambda: self._execute_quick_command("ros2 node list"))
         grid.addWidget(self.btn_nodes, 0, 1)
 
-        self.btn_topics_info = QtWidgets.QPushButton("Topics con tipo (ros2 topic list -t)")
-        self.btn_topics_info.setIconSize(QtCore.QSize(16, 16))
-        self.btn_topics_info.clicked.connect(lambda: self._execute_quick_command("ros2 topic list -t"))
-        grid.addWidget(self.btn_topics_info, 1, 0, 1, 2)
-
         self.btn_compile = QtWidgets.QPushButton("Compilar workspace (colcon build)")
         self.btn_compile.setIconSize(QtCore.QSize(16, 16))
         self.btn_compile.clicked.connect(self._on_compile_workspace)
-        grid.addWidget(self.btn_compile, 2, 0)
+        grid.addWidget(self.btn_compile, 1, 0)
 
         self.btn_clean_compile = QtWidgets.QPushButton("Limpiar compilación (clean build)")
         self.btn_clean_compile.setIconSize(QtCore.QSize(16, 16))
         self.btn_clean_compile.clicked.connect(self._on_clean_compilation)
-        grid.addWidget(self.btn_clean_compile, 2, 1)
+        grid.addWidget(self.btn_clean_compile, 1, 1)
 
         cmd_layout.addLayout(grid)
         layout.addWidget(cmd_card)
