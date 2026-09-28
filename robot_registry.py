@@ -117,14 +117,9 @@ def _build_generic_command(scenario_id: str, world_name: str, extra_args: str, f
 # --- Catálogo de Escenarios Comunes ---
 STANDARD_SCENARIOS = [
     Scenario(
-        id="nav2",
-        name="Gazebo Sim + Nav2 (Navegación completa y RViz2)",
-        description="Simulación completa en Gazebo con localización AMCL/Nav2, planificación global/local y visualización en RViz2."
-    ),
-    Scenario(
-        id="slam",
-        name="Gazebo Sim + SLAM Toolbox (Modo mapeo)",
-        description="Generación de mapas en tiempo real con SLAM Toolbox mediante LIDAR y teleoperación."
+        id="container_only",
+        name="Solo contenedor (sin procesos / modo libre)",
+        description="Inicia el contenedor Docker con el workspace montado y servidor noVNC activo, sin ningún nodo ni launch. Control total mediante terminal."
     ),
     Scenario(
         id="sim_only",
@@ -137,15 +132,20 @@ STANDARD_SCENARIOS = [
         description="Abre RViz2 con la descripción cinemática y modelo visual del robot."
     ),
     Scenario(
+        id="nav2",
+        name="Gazebo Sim + Nav2 (Navegación completa y RViz2)",
+        description="Simulación completa en Gazebo con localización AMCL/Nav2, planificación global/local y visualización en RViz2."
+    ),
+    Scenario(
+        id="slam",
+        name="Gazebo Sim + SLAM Toolbox (Modo mapeo)",
+        description="Generación de mapas en tiempo real con SLAM Toolbox mediante LIDAR y teleoperación."
+    ),
+    Scenario(
         id="teleop",
         name="Teleoperación por teclado",
         description="Control interactivo de velocidad lineal y angular (teleop_twist_keyboard)."
-    ),
-    Scenario(
-        id="container_only",
-        name="Solo contenedor (sin procesos / modo libre)",
-        description="Inicia el contenedor Docker con el workspace montado y servidor noVNC activo, sin ningún nodo ni launch. Control total mediante terminal."
-    ),
+    )
 ]
 
 
@@ -179,7 +179,7 @@ ROBOT_REGISTRY: Dict[str, RobotProfile] = {
         id="turtlebot4",
         name="TurtleBot 4 (iRobot Create3)",
         description="Plataforma diferencial estándar de la asignatura con cámara OAK-D y LiDAR 2D.",
-        supported_worlds=["warehouse", "depot", "maze", "empty"],
+        supported_worlds=["empty", "warehouse", "depot", "maze"],
         scenarios=STANDARD_SCENARIOS,
         command_builder=_build_turtlebot4_command
     )
