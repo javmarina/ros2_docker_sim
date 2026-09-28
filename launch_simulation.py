@@ -405,6 +405,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self._is_starting_docker = False
         self._docker_poll_timer: Optional[QtCore.QTimer] = None
         self._docker_poll_count = 0
+        self._is_loading_preferences = True
 
         # Conexiones de señales Qt entre hilos
         self.sig_manual_update_result.connect(self._on_manual_update_result)
@@ -1090,7 +1091,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.cbo_robot = QtWidgets.QComboBox()
         self.cbo_robot.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         for r in get_all_robots():
-            self.cbo_robot.addItem(r.name)
+            self.cbo_robot.addItem(r.name, userData=r.id)
         self.cbo_robot.currentIndexChanged.connect(self._on_robot_changed)
         grid.addWidget(self.cbo_robot, 0, 1)
 
@@ -1386,47 +1387,71 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     # --- Persistencia y Carga de Configuraciones ---
 
     def _load_saved_preferences(self):
-        # 1. Workspace
-        saved_ws = self.config_store.get("workspace_path")
-        self.ent_ws_path.setText(saved_ws)
-        self._update_workspace_validation()
+        self._is_loading_preferences = True
+        try:
+            # 1. Workspace
+            saved_ws = self.config_store.get("workspace_path")
+            self.ent_ws_path.setText(saved_ws)
+            self._update_workspace_validation()
 
-        # 2. Robot
-        saved_robot_id = self.config_store.get("robot_id", "base")
-        robot_profile = get_robot_by_id(saved_robot_id) or get_all_robots()[0]
-        self.cbo_robot.setCurrentText(robot_profile.name)
-        self._update_worlds_and_scenarios(robot_profile)
+            # 2. Robot
+            saved_robot_id = self.config_store.get("robot_id", "base")
+            robot_profile = get_robot_by_id(saved_robot_id) or get_robot_by_name(saved_robot_id) or get_all_robots()[0]
+            self.cbo_robot.blockSignals(True)
+            idx_r = self.cbo_robot.findData(robot_profile.id)
+            if idx_r < 0:
+                idx_r = self.cbo_robot.findText(robot_profile.name)
+            if idx_r >= 0:
+                self.cbo_robot.setCurrentIndex(idx_r)
+            else:
+                self.cbo_robot.setCurrentText(robot_profile.name)
+            self.cbo_robot.blockSignals(False)
 
-        # 3. Mundo
-        saved_world = self.config_store.get("world_name", "warehouse")
-        idx_w = self.cbo_world.findText(saved_world)
-        if idx_w >= 0:
-            self.cbo_world.setCurrentIndex(idx_w)
+            self._update_worlds_and_scenarios(robot_profile)
 
-        # 4. Escenario
-        saved_sc = self.config_store.get("scenario_id", "container_only")
-        if saved_sc == "bash":
-            saved_sc = "container_only"
-        sc_obj = robot_profile.get_scenario_by_id(saved_sc)
-        if sc_obj:
-            idx_s = self.cbo_scenario.findText(sc_obj.name)
-            if idx_s >= 0:
-                self.cbo_scenario.setCurrentIndex(idx_s)
-        self._on_scenario_changed()
+            # 3. Mundo
+            saved_world = self.config_store.get("world_name", "warehouse")
+            idx_w = self.cbo_world.findText(saved_world)
+            if idx_w >= 0:
+                self.cbo_world.blockSignals(True)
+                self.cbo_world.setCurrentIndex(idx_w)
+                self.cbo_world.blockSignals(False)
 
-        # 5. Domain ID, Puerto, Args
-        self.ent_domain_id.setText(str(self.config_store.get("ros_domain_id", "42")))
-        self.ent_web_port.setText(str(self.config_store.get("web_port", str(DEFAULT_NOVNC_PORT))))
-        self.ent_extra_args.setText(str(self.config_store.get("extra_args", "use_sim_time:=true")))
-        self.chk_force_rebuild.setChecked(bool(self.config_store.get("force_rebuild", False)))
+            # 4. Escenario
+            saved_sc = self.config_store.get("scenario_id", "container_only")
+            if saved_sc == "bash":
+                saved_sc = "container_only"
+            sc_obj = robot_profile.get_scenario_by_id(saved_sc)
+            if sc_obj:
+                idx_s = self.cbo_scenario.findText(sc_obj.name)
+                if idx_s >= 0:
+                    self.cbo_scenario.blockSignals(True)
+                    self.cbo_scenario.setCurrentIndex(idx_s)
+                    self.cbo_scenario.blockSignals(False)
+            self._on_scenario_changed()
+
+            # 5. Domain ID, Puerto, Args
+            self.ent_domain_id.setText(str(self.config_store.get("ros_domain_id", "42")))
+            self.ent_web_port.setText(str(self.config_store.get("web_port", str(DEFAULT_NOVNC_PORT))))
+            self.ent_extra_args.setText(str(self.config_store.get("extra_args", "use_sim_time:=true")))
+            self.chk_force_rebuild.setChecked(bool(self.config_store.get("force_rebuild", False)))
+        finally:
+            self._is_loading_preferences = False
 
     def _save_current_settings(self):
-        selected_robot_name = self.cbo_robot.currentText()
-        robot_profile = get_robot_by_name(selected_robot_name)
-        robot_id = robot_profile.id if robot_profile else "turtlebot4"
+        if getattr(self, "_is_loading_preferences", False):
+            return
+
+        robot_id = self.cbo_robot.currentData()
+        if not robot_id:
+            selected_robot_name = self.cbo_robot.currentText()
+            robot_profile = get_robot_by_name(selected_robot_name)
+            robot_id = robot_profile.id if robot_profile else "turtlebot4"
+        else:
+            robot_profile = get_robot_by_id(robot_id)
 
         selected_scenario_name = self.cbo_scenario.currentText()
-        scenario_id = "nav2"
+        scenario_id = "container_only" if (robot_profile and robot_profile.id == "base") else "nav2"
         if robot_profile:
             sc_obj = robot_profile.get_scenario_by_name(selected_scenario_name)
             if sc_obj:
@@ -1480,8 +1505,13 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self._style_status_label(self.lbl_ws_status, f"[Aviso] {msg}", "error")
 
     def _on_robot_changed(self):
-        selected_name = self.cbo_robot.currentText()
-        robot_profile = get_robot_by_name(selected_name)
+        if getattr(self, "_is_loading_preferences", False):
+            return
+        robot_id = self.cbo_robot.currentData()
+        robot_profile = get_robot_by_id(robot_id) if robot_id else None
+        if not robot_profile:
+            selected_name = self.cbo_robot.currentText()
+            robot_profile = get_robot_by_name(selected_name)
         if robot_profile:
             self._update_worlds_and_scenarios(robot_profile)
             self._on_scenario_changed()
@@ -1503,8 +1533,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.cbo_scenario.blockSignals(False)
 
     def _on_scenario_changed(self):
-        selected_robot_name = self.cbo_robot.currentText()
-        robot_profile = get_robot_by_name(selected_robot_name)
+        robot_id = self.cbo_robot.currentData()
+        robot_profile = get_robot_by_id(robot_id) if robot_id else None
+        if not robot_profile:
+            selected_robot_name = self.cbo_robot.currentText()
+            robot_profile = get_robot_by_name(selected_robot_name)
         scenario_id = "nav2"
         if robot_profile:
             scenario_name = self.cbo_scenario.currentText()
@@ -1870,8 +1903,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
             DockerService.stop_container(DEFAULT_CONTAINER_NAME)
 
-            selected_robot_name = self.cbo_robot.currentText()
-            robot_profile = get_robot_by_name(selected_robot_name) or get_all_robots()[0]
+            robot_id = self.cbo_robot.currentData()
+            robot_profile = get_robot_by_id(robot_id) if robot_id else None
+            if not robot_profile:
+                selected_robot_name = self.cbo_robot.currentText()
+                robot_profile = get_robot_by_name(selected_robot_name) or get_all_robots()[0]
 
             selected_sc_name = self.cbo_scenario.currentText()
             scenario_obj = robot_profile.get_scenario_by_name(selected_sc_name)
@@ -2153,6 +2189,9 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     def closeEvent(self, event: QtGui.QCloseEvent):
         # Cancelar cualquier sondeo activo de Docker en segundo plano
         self._is_starting_docker = False
+
+        # Guardar configuración actual antes de salir
+        self._save_current_settings()
 
         # Detener temporizadores activos para evitar advertencias de Qt al cerrar
         if self._docker_poll_timer and self._docker_poll_timer.isActive():
