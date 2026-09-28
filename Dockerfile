@@ -5,7 +5,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV RCUTILS_COLORIZED_OUTPUT=1
 
 # Install Navigation2 (Nav2), SLAM Toolbox, TurtleBot4, TIAGo dependencies, and Gazebo (ros_gz) integration
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN echo "=== [1/3] Actualizando repositorios APT ===" && \
+    apt-get update && \
+    echo "=== [2/3] Instalando dependencias de ROS 2 y utilidades del sistema ===" && \
+    apt-get install -y --no-install-recommends \
+        --verbose-versions \
+        -o Dpkg::Use-Pty=0 \
     ros-jazzy-navigation2 \
     ros-jazzy-nav2-bringup \
     ros-jazzy-slam-toolbox \
@@ -47,6 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     curl \
     net-tools \
+    && echo "=== [3/3] Limpiando cache de APT ===" \
     && rm -rf /var/lib/apt/lists/*
 
 # Set default model
