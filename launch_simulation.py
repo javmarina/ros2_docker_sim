@@ -16,8 +16,10 @@ import urllib.parse
 import webbrowser
 import subprocess
 import threading
+import socket
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -433,6 +435,213 @@ class AnsiColorParser:
                     cursor.insertText(clean_text, self.current_format)
 
 
+
+# --- Utilidades de Red y Detección del Robot TurtleBot 4 ---
+
+DEFAULT_TURTLEBOT4_MAC = "e4:5f:01:bd:05:1a"
+
+def get_connected_ssid() -> Optional[str]:
+    """
+    Retorna el SSID de la red Wi-Fi actualmente conectada, o None si no está conectado o no disponible.
+    Soporta Windows (netsh wlan / Get-NetConnectionProfile), Linux (iwgetid / nmcli) y macOS (airport).
+    """
+    try:
+        if sys.platform == "win32":
+            # 1. Intento ultrarrápido con netsh wlan show interfaces
+            try:
+                flags = subprocess.CREATE_NO_WINDOW
+                out = subprocess.check_output(
+                    ["netsh", "wlan", "show", "interfaces"],
+                    text=True, stderr=subprocess.DEVNULL,
+                    creationflags=flags
+                )
+                for line in out.splitlines():
+                    if "SSID" in line and "BSSID" not in line:
+                        parts = line.split(":", 1)
+                        if len(parts) == 2:
+                            ssid = parts[1].strip()
+                            if ssid:
+                                return ssid
+            except Exception:
+                pass
+
+            # 2. Fallback a PowerShell Get-NetConnectionProfile
+            try:
+                flags = subprocess.CREATE_NO_WINDOW
+                output = subprocess.check_output(
+                    ["powershell", "-NoProfile", "-Command", "Get-NetConnectionProfile"],
+                    text=True, stderr=subprocess.DEVNULL,
+                    creationflags=flags
+                )
+                for line in output.splitlines():
+                    if ":" in line:
+                        key, _, value = line.partition(":")
+                        if key.strip().lower() == "name":
+                            name = value.strip()
+                            if name:
+                                return name
+            except Exception:
+                pass
+        elif sys.platform == "darwin":
+            cmd = ["/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport", "-I"]
+            out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
+            for line in out.splitlines():
+                if "SSID:" in line and "BSSID" not in line:
+                    return line.split(":", 1)[1].strip()
+        else:
+            for cmd in [["iwgetid", "-r"], ["nmcli", "-t", "-f", "active,ssid", "dev", "wifi"]]:
+                try:
+                    out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
+                    lines = [l.strip() for l in out.splitlines() if l.strip()]
+                    if lines:
+                        if cmd[0] == "nmcli":
+                            for l in lines:
+                                if l.startswith("yes:"):
+                                    return l.split(":", 1)[1]
+                        else:
+                            return lines[0]
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.debug("Error al consultar SSID Wi-Fi: %s", e)
+    return None
+
+
+def get_local_ip() -> str:
+    """Determina la IP local de la interfaz de red activa."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
+
+
+def get_ip_from_mac(target_mac: str) -> Optional[str]:
+    """
+    Escanea la tabla ARP local para encontrar la IP asociada a una dirección MAC específica.
+    Lógica adaptada de proxy.py.
+    """
+    target_mac = target_mac.lower().replace("-", ":").strip()
+    try:
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        output = subprocess.check_output(["arp", "-a"], text=True, stderr=subprocess.DEVNULL, creationflags=flags)
+        for line in output.splitlines():
+            clean_line = line.lower().replace("-", ":")
+            if target_mac in clean_line:
+                match = re.search(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", line)
+                if match:
+                    return match.group(1)
+    except Exception as e:
+        logger.debug("Error al escanear tabla ARP: %s", e)
+    return None
+
+
+def ping_device(ip_address: str, timeout: float = 1.0) -> bool:
+    """Comprueba mediante ping si un host es alcanzable en la red."""
+    if not ip_address:
+        return False
+    try:
+        param = "-n" if sys.platform == "win32" else "-c"
+        w_param = "-w" if sys.platform == "win32" else "-W"
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        ms = str(int(timeout * 1000)) if sys.platform == "win32" else str(max(1, int(timeout)))
+        subprocess.check_output(
+            ["ping", param, "1", w_param, ms, ip_address],
+            stderr=subprocess.DEVNULL,
+            creationflags=flags
+        )
+        return True
+    except Exception:
+        return False
+
+
+def subnet_sweep(local_ip: str, timeout: float = 0.35) -> None:
+    """
+    Realiza un barrido ICMP rápido sobre toda la subred local /24 para poblar la tabla ARP.
+    Lógica adaptada de proxy.py.
+    """
+    try:
+        parts = local_ip.split(".")
+        if len(parts) != 4:
+            return
+        subnet_prefix = ".".join(parts[:-1])
+        own_last = int(parts[-1])
+        ips = [f"{subnet_prefix}.{i}" for i in range(1, 255) if i != own_last]
+
+        param = "-n" if sys.platform == "win32" else "-c"
+        w_param = "-w" if sys.platform == "win32" else "-W"
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        ms = str(int(timeout * 1000)) if sys.platform == "win32" else str(max(1, int(timeout)))
+
+        def _ping(ip: str):
+            try:
+                subprocess.run(
+                    ["ping", param, "1", w_param, ms, ip],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    creationflags=flags
+                )
+            except Exception:
+                pass
+
+        with ThreadPoolExecutor(max_workers=32) as executor:
+            list(executor.map(_ping, ips))
+    except Exception as e:
+        logger.debug("Error en subnet_sweep: %s", e)
+
+
+def sftp_upload_dir(sftp, local_dir: Path, remote_dir: str, log_cb=None) -> int:
+    """
+    Sube recursivamente un directorio local a un directorio remoto vía SFTP.
+    Omite artefactos de compilación, carpetas de control de versiones y temporales.
+    """
+    ignore_dirs = {".git", ".svn", "build", "install", "log", "__pycache__", ".vscode", ".idea", ".DS_Store"}
+
+    def _remote_mkdir_p(path: str):
+        clean = path.replace("\\", "/")
+        parts = clean.strip("/").split("/")
+        cur = "/" if clean.startswith("/") else ""
+        for p in parts:
+            cur = f"{cur.rstrip('/')}/{p}"
+            try:
+                sftp.stat(cur)
+            except IOError:
+                try:
+                    sftp.mkdir(cur)
+                except IOError:
+                    pass
+
+    _remote_mkdir_p(remote_dir)
+    file_count = 0
+    local_p = Path(local_dir).resolve()
+
+    for root, dirs, files in os.walk(local_p):
+        dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.startswith(".")]
+        rel = os.path.relpath(root, local_p).replace("\\", "/")
+        dest_sub = remote_dir if rel == "." else f"{remote_dir}/{rel}"
+        _remote_mkdir_p(dest_sub)
+
+        for f in files:
+            if f.endswith((".pyc", ".swp", "~")) or f in ignore_dirs:
+                continue
+            src_file = os.path.join(root, f)
+            dest_file = f"{dest_sub}/{f}"
+            if log_cb:
+                disp = f if rel == "." else f"{rel}/{f}"
+                log_cb(f"  -> [SCP] {disp}\n")
+            sftp.put(src_file, dest_file)
+            file_count += 1
+
+    return file_count
+
+
 # --- Ventana Principal del Launcher ---
 
 class ModernSimulationLauncher(QtWidgets.QMainWindow):
@@ -446,6 +655,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     sig_docker_poll_progress = QtCore.Signal(int, int)  # (elapsed_seconds, max_seconds)
     sig_container_status = QtCore.Signal(bool)  # (is_running)
     sig_log_received = QtCore.Signal(str)
+    sig_robot_scan_finished = QtCore.Signal(bool, str, bool, str, str)  # (wifi_ok, ssid, robot_found, robot_ip, msg)
 
     def __init__(self):
         super().__init__()
@@ -475,6 +685,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self._is_checking_container: bool = False
         self._container_poll_timer: Optional[QtCore.QTimer] = None
 
+        # Control de estado del robot TurtleBot 4
+        self._last_robot_scan_data: Optional[Tuple[bool, str, bool, str, str]] = None
+        self._is_scanning_robot: bool = False
+        self._has_checked_robot_once: bool = False
+
         # Conexiones de señales Qt entre hilos
         self.sig_manual_update_result.connect(self._on_manual_update_result)
         self.sig_docker_status.connect(self._apply_docker_status)
@@ -483,6 +698,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.sig_docker_poll_progress.connect(self._on_docker_poll_progress)
         self.sig_container_status.connect(self._on_container_status_changed)
         self.sig_log_received.connect(self._append_log_main_thread)
+        self.sig_robot_scan_finished.connect(self._on_robot_scan_finished)
 
         self._is_dark = self.is_dark_mode()
         self._setup_window_icon()
@@ -556,6 +772,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self._refresh_icons(is_dark)
         self._update_workspace_validation()
         self._refresh_docker_badge_style()
+        self._refresh_robot_status_styles()
 
     def _style_badge(self, label: QtWidgets.QLabel, text: str, kind: str):
         """Aplica estilo consistente a los badges según el tema activo (light/dark)."""
@@ -631,6 +848,10 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             ("btn_prep_image", "view-refresh", QtWidgets.QStyle.StandardPixmap.SP_BrowserReload),
             ("btn_clean_cache", "user-trash", QtWidgets.QStyle.StandardPixmap.SP_TrashIcon),
             ("btn_check_updates", "system-software-update", QtWidgets.QStyle.StandardPixmap.SP_BrowserReload),
+            ("btn_scan_robot", "view-refresh", QtWidgets.QStyle.StandardPixmap.SP_BrowserReload),
+            ("btn_robot_scp", "document-open", QtWidgets.QStyle.StandardPixmap.SP_ArrowUp),
+            ("btn_robot_compile", "applications-development", QtWidgets.QStyle.StandardPixmap.SP_CommandLink),
+            ("btn_robot_terminal", "utilities-terminal", QtWidgets.QStyle.StandardPixmap.SP_DesktopIcon),
         ]
         for attr, key, fallback in btn_icon_map:
             if hasattr(self, attr):
@@ -1085,34 +1306,40 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             "document-properties",
             "utilities-terminal",
             "applications-development",
+            "network-wired",
             "applications-system",
             "help-browser"
         ]
 
         # 1. Configuración
-        tab_config = QtWidgets.QWidget()
-        self._build_config_tab(tab_config)
-        self.tab_widget.addTab(tab_config, QtGui.QIcon(), "Configuración de simulación")
+        self.tab_config = QtWidgets.QWidget()
+        self._build_config_tab(self.tab_config)
+        self.tab_widget.addTab(self.tab_config, QtGui.QIcon(), "Configuración de simulación")
 
         # 2. Logs
-        tab_logs = QtWidgets.QWidget()
-        self._build_logs_tab(tab_logs)
-        self.tab_widget.addTab(tab_logs, QtGui.QIcon(), "Salida y logs")
+        self.tab_logs = QtWidgets.QWidget()
+        self._build_logs_tab(self.tab_logs)
+        self.tab_widget.addTab(self.tab_logs, QtGui.QIcon(), "Salida y logs")
 
         # 3. Comandos Rápidos
-        tab_quick = QtWidgets.QWidget()
-        self._build_quick_tab(tab_quick)
-        self.tab_widget.addTab(tab_quick, QtGui.QIcon(), "Comandos rápidos")
+        self.tab_quick = QtWidgets.QWidget()
+        self._build_quick_tab(self.tab_quick)
+        self.tab_widget.addTab(self.tab_quick, QtGui.QIcon(), "Comandos rápidos")
 
-        # 4. Ajustes Avanzados
-        tab_advanced = QtWidgets.QWidget()
-        self._build_advanced_tab(tab_advanced)
-        self.tab_widget.addTab(tab_advanced, QtGui.QIcon(), "Ajustes avanzados")
+        # 4. TurtleBot 4
+        self.tab_physical = QtWidgets.QWidget()
+        self._build_physical_tab(self.tab_physical)
+        self.tab_widget.addTab(self.tab_physical, QtGui.QIcon(), "TurtleBot 4")
 
-        # 5. Guía del Estudiante
-        tab_guide = QtWidgets.QWidget()
-        self._build_guide_tab(tab_guide)
-        self.tab_widget.addTab(tab_guide, QtGui.QIcon(), "Guía del estudiante")
+        # 5. Ajustes Avanzados
+        self.tab_advanced = QtWidgets.QWidget()
+        self._build_advanced_tab(self.tab_advanced)
+        self.tab_widget.addTab(self.tab_advanced, QtGui.QIcon(), "Ajustes avanzados")
+
+        # 6. Guía del Estudiante
+        self.tab_guide = QtWidgets.QWidget()
+        self._build_guide_tab(self.tab_guide)
+        self.tab_widget.addTab(self.tab_guide, QtGui.QIcon(), "Guía del estudiante")
 
         # Asegurar que la pestaña seleccionada (fondo azul) tenga icono blanco puro
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
@@ -1125,14 +1352,19 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         is_dark = getattr(self, "_is_dark", False)
         p = THEME_PALETTES["dark" if is_dark else "light"]
         for i, key in enumerate(self.tab_icon_keys):
-            if i == current_index:
-                self.tab_widget.setTabIcon(i, get_themed_icon(key, color=p["tab_icon_selected"]))
-            else:
-                self.tab_widget.setTabIcon(i, get_themed_icon(key, color=p["tab_icon_normal"]))
+            if i < self.tab_widget.count():
+                if i == current_index:
+                    self.tab_widget.setTabIcon(i, get_themed_icon(key, color=p["tab_icon_selected"]))
+                else:
+                    self.tab_widget.setTabIcon(i, get_themed_icon(key, color=p["tab_icon_normal"]))
 
-        # Al acceder a la pestaña Avanzada (índice 2), refrescar estado de imagen Docker
-        if current_index == 2:
+        # Al acceder a la pestaña Avanzada, refrescar estado de imagen Docker
+        if hasattr(self, "tab_advanced") and self.tab_widget.currentWidget() == self.tab_advanced:
             self._update_docker_image_ui_state()
+
+        # Al acceder a la pestaña Física, refrescar estado inicial si no se ha comprobado aún
+        if hasattr(self, "tab_physical") and self.tab_widget.currentWidget() == self.tab_physical:
+            self._on_physical_tab_opened()
 
     def _build_config_tab(self, parent: QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(parent)
@@ -1349,6 +1581,197 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         layout.addWidget(custom_card)
         layout.addStretch()
 
+    def _build_physical_tab(self, parent: QtWidgets.QWidget):
+        layout = QtWidgets.QVBoxLayout(parent)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(14)
+
+        # ----------------------------------------------------
+        # Tarjeta 1: Estado de Red y Detección del Robot
+        # ----------------------------------------------------
+        status_card = QtWidgets.QFrame()
+        status_card.setProperty("card", True)
+        status_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        s_layout = QtWidgets.QVBoxLayout(status_card)
+        s_layout.setContentsMargins(16, 14, 16, 14)
+        s_layout.setSpacing(12)
+
+        lbl_status_title = QtWidgets.QLabel("Estado de conexión del TurtleBot 4")
+        lbl_status_title.setProperty("heading", True)
+        s_layout.addWidget(lbl_status_title)
+
+        # Fila 1: Wi-Fi
+        wifi_row = QtWidgets.QHBoxLayout()
+        wifi_row.setSpacing(10)
+        lbl_wifi_title = QtWidgets.QLabel("Red Wi-Fi:")
+        lbl_wifi_title.setFixedWidth(150)
+        lbl_wifi_title.setProperty("heading_small", True)
+        wifi_row.addWidget(lbl_wifi_title)
+
+        self.lbl_wifi_badge = QtWidgets.QLabel("Sin comprobar")
+        self.lbl_wifi_badge.setFixedHeight(24)
+        self._style_badge(self.lbl_wifi_badge, "Sin comprobar", "neutral")
+        wifi_row.addWidget(self.lbl_wifi_badge)
+
+        self.lbl_wifi_desc = QtWidgets.QLabel("Verificando si el PC está conectado a la red Wi-Fi 'dd-wrt' del laboratorio.")
+        self.lbl_wifi_desc.setProperty("secondary", True)
+        wifi_row.addWidget(self.lbl_wifi_desc, 1)
+        s_layout.addLayout(wifi_row)
+
+        # Fila 2: Robot Status & MAC
+        robot_row = QtWidgets.QHBoxLayout()
+        robot_row.setSpacing(10)
+        lbl_robot_title = QtWidgets.QLabel("TurtleBot 4 (MAC):")
+        lbl_robot_title.setFixedWidth(150)
+        lbl_robot_title.setProperty("heading_small", True)
+        robot_row.addWidget(lbl_robot_title)
+
+        self.lbl_robot_badge = QtWidgets.QLabel("No escaneado")
+        self.lbl_robot_badge.setFixedHeight(24)
+        self._style_badge(self.lbl_robot_badge, "No escaneado", "neutral")
+        robot_row.addWidget(self.lbl_robot_badge)
+
+        self.lbl_robot_desc = QtWidgets.QLabel("MAC objetivo: e4:5f:01:bd:05:1a")
+        self.lbl_robot_desc.setProperty("secondary", True)
+        robot_row.addWidget(self.lbl_robot_desc, 1)
+        s_layout.addLayout(robot_row)
+
+        # Fila 3: Dirección IP y Botón Escanear
+        ip_row = QtWidgets.QHBoxLayout()
+        ip_row.setSpacing(10)
+        lbl_ip_title = QtWidgets.QLabel("Dirección IP del robot:")
+        lbl_ip_title.setFixedWidth(150)
+        lbl_ip_title.setProperty("heading_small", True)
+        ip_row.addWidget(lbl_ip_title)
+
+        self.ent_robot_ip = QtWidgets.QLineEdit()
+        self.ent_robot_ip.setPlaceholderText("ej. 192.168.1.142")
+        self.ent_robot_ip.setFixedWidth(160)
+        self.ent_robot_ip.textChanged.connect(self._save_current_settings)
+        ip_row.addWidget(self.ent_robot_ip)
+
+        self.btn_scan_robot = QtWidgets.QPushButton("Buscar / Escanear robot")
+        self.btn_scan_robot.setIconSize(QtCore.QSize(16, 16))
+        self.btn_scan_robot.clicked.connect(lambda: self._start_robot_scan(deep_sweep=True))
+        ip_row.addWidget(self.btn_scan_robot)
+
+        lbl_ip_hint = QtWidgets.QLabel("(Se autocompleta al detectar el robot en la red o puede introducirse manualmente)")
+        lbl_ip_hint.setProperty("note", True)
+        ip_row.addWidget(lbl_ip_hint, 1)
+        s_layout.addLayout(ip_row)
+
+        layout.addWidget(status_card)
+
+        # ----------------------------------------------------
+        # Tarjeta 2: Parámetros de Acceso SSH
+        # ----------------------------------------------------
+        ssh_card = QtWidgets.QFrame()
+        ssh_card.setProperty("card", True)
+        ssh_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        ssh_layout = QtWidgets.QVBoxLayout(ssh_card)
+        ssh_layout.setContentsMargins(16, 14, 16, 14)
+        ssh_layout.setSpacing(10)
+
+        lbl_ssh_head = QtWidgets.QLabel("Parámetros de acceso y workspace remoto")
+        lbl_ssh_head.setProperty("heading", True)
+        ssh_layout.addWidget(lbl_ssh_head)
+
+        ssh_grid = QtWidgets.QGridLayout()
+        ssh_grid.setHorizontalSpacing(14)
+        ssh_grid.setVerticalSpacing(8)
+
+        # Usuario SSH
+        lbl_user = QtWidgets.QLabel("Usuario SSH:")
+        lbl_user.setProperty("heading_small", True)
+        ssh_grid.addWidget(lbl_user, 0, 0)
+        self.ent_robot_user = QtWidgets.QLineEdit("ubuntu")
+        self.ent_robot_user.textChanged.connect(self._save_current_settings)
+        ssh_grid.addWidget(self.ent_robot_user, 0, 1)
+
+        # Contraseña SSH
+        lbl_pwd = QtWidgets.QLabel("Contraseña SSH:")
+        lbl_pwd.setProperty("heading_small", True)
+        ssh_grid.addWidget(lbl_pwd, 0, 2)
+        self.ent_robot_password = QtWidgets.QLineEdit("turtlebot4")
+        self.ent_robot_password.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+        self.ent_robot_password.textChanged.connect(self._save_current_settings)
+        ssh_grid.addWidget(self.ent_robot_password, 0, 3)
+
+        # Puerto SSH
+        lbl_port = QtWidgets.QLabel("Puerto SSH:")
+        lbl_port.setProperty("heading_small", True)
+        ssh_grid.addWidget(lbl_port, 1, 0)
+        self.ent_robot_port = QtWidgets.QLineEdit("22")
+        self.ent_robot_port.setFixedWidth(80)
+        self.ent_robot_port.textChanged.connect(self._save_current_settings)
+        ssh_grid.addWidget(self.ent_robot_port, 1, 1)
+
+        # Workspace remoto
+        lbl_ws = QtWidgets.QLabel("Workspace remoto:")
+        lbl_ws.setProperty("heading_small", True)
+        ssh_grid.addWidget(lbl_ws, 1, 2)
+        self.ent_robot_ws = QtWidgets.QLineEdit("~/ros2_ws")
+        self.ent_robot_ws.textChanged.connect(self._save_current_settings)
+        ssh_grid.addWidget(self.ent_robot_ws, 1, 3)
+
+        ssh_layout.addLayout(ssh_grid)
+
+        lbl_ssh_note = QtWidgets.QLabel("Valores predeterminados para TurtleBot 4: usuario 'ubuntu', contraseña 'turtlebot4', workspace '~/ros2_ws'.")
+        lbl_ssh_note.setProperty("note", True)
+        ssh_layout.addWidget(lbl_ssh_note)
+
+        layout.addWidget(ssh_card)
+
+        # ----------------------------------------------------
+        # Tarjeta 3: Acciones con el Robot
+        # ----------------------------------------------------
+        ops_card = QtWidgets.QFrame()
+        ops_card.setProperty("card", True)
+        ops_card.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        ops_layout = QtWidgets.QVBoxLayout(ops_card)
+        ops_layout.setContentsMargins(16, 14, 16, 14)
+        ops_layout.setSpacing(12)
+
+        lbl_ops_head = QtWidgets.QLabel("Operaciones en el Robot Real")
+        lbl_ops_head.setProperty("heading", True)
+        ops_layout.addWidget(lbl_ops_head)
+
+        # Botones de acción
+        btn_grid = QtWidgets.QGridLayout()
+        btn_grid.setSpacing(10)
+
+        # 1. Enviar código (SCP)
+        self.btn_robot_scp = QtWidgets.QPushButton("Enviar código al robot (SCP)")
+        self.btn_robot_scp.setIconSize(QtCore.QSize(16, 16))
+        self.btn_robot_scp.clicked.connect(self._on_robot_send_code)
+        btn_grid.addWidget(self.btn_robot_scp, 0, 0)
+
+        # 2. Compilar en robot
+        self.btn_robot_compile = QtWidgets.QPushButton("Compilar en el robot (colcon build)")
+        self.btn_robot_compile.setIconSize(QtCore.QSize(16, 16))
+        self.btn_robot_compile.clicked.connect(self._on_robot_compile)
+        btn_grid.addWidget(self.btn_robot_compile, 0, 1)
+
+        # 3. Abrir terminal
+        self.btn_robot_terminal = QtWidgets.QPushButton("Abrir terminal en el robot (SSH)")
+        self.btn_robot_terminal.setIconSize(QtCore.QSize(16, 16))
+        self.btn_robot_terminal.setStyleSheet("background-color: #2563eb; color: #ffffff; font-weight: 700; padding: 7px 14px;")
+        self.btn_robot_terminal.clicked.connect(self._on_robot_open_terminal)
+        btn_grid.addWidget(self.btn_robot_terminal, 1, 0, 1, 2)
+
+        ops_layout.addLayout(btn_grid)
+
+        lbl_ops_info = QtWidgets.QLabel(
+            "• 'Enviar código (SCP)': Sincroniza la carpeta 'src' del workspace local con el workspace remoto en el TurtleBot 4.\n"
+            "• 'Compilar en el robot': Ejecuta 'colcon build --symlink-install' en el robot; la salida se muestra en directo en la pestaña 'Salida y logs'.\n"
+            "• 'Abrir terminal en el robot': Lanza una sesión interactiva SSH en una ventana de consola independiente."
+        )
+        lbl_ops_info.setProperty("secondary", True)
+        ops_layout.addWidget(lbl_ops_info)
+
+        layout.addWidget(ops_card)
+        layout.addStretch()
+
     def _build_advanced_tab(self, parent: QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(parent)
         layout.setContentsMargins(16, 14, 16, 14)
@@ -1546,6 +1969,19 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self.ent_web_port.setText(str(self.config_store.get("web_port", str(DEFAULT_NOVNC_PORT))))
             self.ent_extra_args.setText(str(self.config_store.get("extra_args", "use_sim_time:=true")))
             self.chk_force_rebuild.setChecked(bool(self.config_store.get("force_rebuild", False)))
+
+            # 6. TurtleBot 4
+            saved_robot_ip = self.config_store.get("robot_ip", "")
+            if hasattr(self, "ent_robot_ip"):
+                self.ent_robot_ip.setText(str(saved_robot_ip))
+            if hasattr(self, "ent_robot_user"):
+                self.ent_robot_user.setText(str(self.config_store.get("robot_user", "ubuntu")))
+            if hasattr(self, "ent_robot_password"):
+                self.ent_robot_password.setText(str(self.config_store.get("robot_password", "turtlebot4")))
+            if hasattr(self, "ent_robot_port"):
+                self.ent_robot_port.setText(str(self.config_store.get("robot_port", "22")))
+            if hasattr(self, "ent_robot_ws"):
+                self.ent_robot_ws.setText(str(self.config_store.get("robot_remote_ws", "~/ros2_ws")))
         finally:
             self._is_loading_preferences = False
 
@@ -1580,6 +2016,16 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             "extra_args": self.ent_extra_args.text().strip(),
             "force_rebuild": self.chk_force_rebuild.isChecked()
         }
+        if hasattr(self, "ent_robot_ip"):
+            data["robot_ip"] = self.ent_robot_ip.text().strip()
+        if hasattr(self, "ent_robot_user"):
+            data["robot_user"] = self.ent_robot_user.text().strip() or "ubuntu"
+        if hasattr(self, "ent_robot_password"):
+            data["robot_password"] = self.ent_robot_password.text().strip() or "turtlebot4"
+        if hasattr(self, "ent_robot_port"):
+            data["robot_port"] = self.ent_robot_port.text().strip() or "22"
+        if hasattr(self, "ent_robot_ws"):
+            data["robot_remote_ws"] = self.ent_robot_ws.text().strip() or "~/ros2_ws"
         self.config_store.update(data, auto_save=True)
 
     # --- Manejadores de Eventos de la Interfaz ---
@@ -2672,6 +3118,285 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     @QtCore.Slot(str, str)
     def _show_warning_box(self, title: str, text: str):
         QtWidgets.QMessageBox.warning(self, title, text)
+
+    # --- Manejadores de Interacción con el TurtleBot 4 ---
+
+    def _on_physical_tab_opened(self):
+        """Al abrir la pestaña del robot por primera vez, realiza una comprobación inicial rápida."""
+        if not getattr(self, "_has_checked_robot_once", False):
+            self._has_checked_robot_once = True
+            self._start_robot_scan(deep_sweep=False)
+
+    def _start_robot_scan(self, deep_sweep: bool = True):
+        if getattr(self, "_is_scanning_robot", False):
+            return
+        self._is_scanning_robot = True
+        if hasattr(self, "btn_scan_robot"):
+            self.btn_scan_robot.setEnabled(False)
+            self.btn_scan_robot.setText("Buscando en la red...")
+        if hasattr(self, "lbl_wifi_badge"):
+            self._style_badge(self.lbl_wifi_badge, "Verificando...", "neutral")
+        if hasattr(self, "lbl_robot_badge"):
+            self._style_badge(self.lbl_robot_badge, "Escaneando...", "neutral")
+            self.lbl_robot_desc.setText("Consultando tabla ARP y barriendo la subred local...")
+
+        def _worker():
+            try:
+                target_mac = self.config_store.get("robot_mac", DEFAULT_TURTLEBOT4_MAC)
+                ssid = get_connected_ssid()
+                wifi_ok = bool(ssid and "dd-wrt" in ssid.lower())
+
+                local_ip = get_local_ip()
+                robot_ip = get_ip_from_mac(target_mac)
+
+                if not robot_ip and deep_sweep and local_ip and local_ip != "127.0.0.1":
+                    subnet_sweep(local_ip, timeout=0.35)
+                    robot_ip = get_ip_from_mac(target_mac)
+
+                robot_found = bool(robot_ip)
+                msg = f"SSID: {ssid or 'N/A'} | Robot IP: {robot_ip or 'No encontrado'}"
+                self.sig_robot_scan_finished.emit(wifi_ok, ssid or "", robot_found, robot_ip or "", msg)
+            except Exception as e:
+                logger.exception("Error durante el escaneo del robot: %s", e)
+                self.sig_robot_scan_finished.emit(False, "", False, "", str(e))
+            finally:
+                self._is_scanning_robot = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    @QtCore.Slot(bool, str, bool, str, str)
+    def _on_robot_scan_finished(self, wifi_ok: bool, ssid: str, robot_found: bool, robot_ip: str, msg: str):
+        self._last_robot_scan_data = (wifi_ok, ssid, robot_found, robot_ip, msg)
+        self._update_robot_ui_status(wifi_ok, ssid, robot_found, robot_ip, msg)
+        if hasattr(self, "btn_scan_robot"):
+            self.btn_scan_robot.setEnabled(True)
+            self.btn_scan_robot.setText("Buscar / Escanear robot")
+
+    def _update_robot_ui_status(self, wifi_ok: bool, ssid: str, robot_found: bool, robot_ip: str, msg: str):
+        if not hasattr(self, "lbl_wifi_badge") or not hasattr(self, "lbl_robot_badge"):
+            return
+
+        # 1. Estado de la red Wi-Fi
+        if not ssid:
+            self._style_badge(self.lbl_wifi_badge, "Desconectado", "error")
+            self.lbl_wifi_desc.setText("No se detecta conexión Wi-Fi activa. Conéctate a 'dd-wrt'.")
+        elif wifi_ok:
+            self._style_badge(self.lbl_wifi_badge, f"Conectado: {ssid}", "success")
+            self.lbl_wifi_desc.setText(f"Conexión activa a la red Wi-Fi del laboratorio ('{ssid}').")
+        else:
+            self._style_badge(self.lbl_wifi_badge, f"Red: {ssid}", "warning")
+            self.lbl_wifi_desc.setText(f"Conectado a '{ssid}'. En el laboratorio se requiere la red 'dd-wrt'.")
+
+        # 2. Estado del Robot y MAC
+        target_mac = self.config_store.get("robot_mac", DEFAULT_TURTLEBOT4_MAC)
+        if robot_found and robot_ip:
+            self._style_badge(self.lbl_robot_badge, "Localizado", "success")
+            self.lbl_robot_desc.setText(f"TurtleBot 4 detectado en la IP {robot_ip} (MAC: {target_mac}).")
+            if hasattr(self, "ent_robot_ip"):
+                current_ip = self.ent_robot_ip.text().strip()
+                if not current_ip or current_ip != robot_ip:
+                    self.ent_robot_ip.setText(robot_ip)
+                    self._save_current_settings()
+        else:
+            self._style_badge(self.lbl_robot_badge, "No detectado", "error")
+            self.lbl_robot_desc.setText(f"Robot no encontrado en la subred (MAC: {target_mac}). Pulsa 'Buscar / Escanear robot'.")
+
+    def _refresh_robot_status_styles(self):
+        if hasattr(self, "_last_robot_scan_data") and self._last_robot_scan_data:
+            wifi_ok, ssid, robot_found, robot_ip, msg = self._last_robot_scan_data
+            self._update_robot_ui_status(wifi_ok, ssid, robot_found, robot_ip, msg)
+
+    def _on_robot_send_code(self):
+        robot_ip = self.ent_robot_ip.text().strip() if hasattr(self, "ent_robot_ip") else ""
+        if not robot_ip:
+            self._show_warning_box("TurtleBot 4", "Por favor introduce o escanea la dirección IP del TurtleBot 4 antes de transferir.")
+            return
+
+        ws_path = self.ent_ws_path.text().strip() if hasattr(self, "ent_ws_path") else ""
+        if not ws_path or not os.path.exists(ws_path):
+            self._show_warning_box("TurtleBot 4", "La carpeta local del espacio de trabajo (workspace) no existe o no es válida.")
+            return
+
+        user = self.ent_robot_user.text().strip() if hasattr(self, "ent_robot_user") else "ubuntu"
+        user = user or "ubuntu"
+        password = self.ent_robot_password.text().strip() if hasattr(self, "ent_robot_password") else "turtlebot4"
+        port = int(self.ent_robot_port.text().strip() or "22") if hasattr(self, "ent_robot_port") else 22
+        remote_ws = self.ent_robot_ws.text().strip() if hasattr(self, "ent_robot_ws") else "~/ros2_ws"
+        remote_ws = remote_ws or "~/ros2_ws"
+
+        self.tab_widget.setCurrentIndex(1)  # Tab Logs
+        self._append_log(f"\n=== [SCP] Enviando código fuente al TurtleBot 4 ({user}@{robot_ip}:{remote_ws}) ===\n")
+
+        def _worker():
+            try:
+                import paramiko
+            except ImportError:
+                self.sig_log_received.emit("\n[Error SCP] La librería 'paramiko' no está instalada en el entorno Python.\n")
+                QtCore.QMetaObject.invokeMethod(
+                    self, "_show_warning_box", QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.Q_ARG(str, "Dependencia faltante"),
+                    QtCore.Q_ARG(str, "Se requiere la librería 'paramiko' para transferir archivos vía SCP/SFTP.\nInstálala con: pip install paramiko")
+                )
+                return
+
+            try:
+                client = paramiko.SSHClient()
+                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                self.sig_log_received.emit(f"[SCP] Estableciendo conexión SFTP con {user}@{robot_ip}:{port}...\n")
+                client.connect(robot_ip, port=port, username=user, password=password, timeout=10.0)
+
+                # Si el workspace remoto inicia con ~, expandir home
+                target_base = remote_ws
+                if target_base.startswith("~"):
+                    _, stdout_h, _ = client.exec_command("echo $HOME")
+                    r_home = stdout_h.read().decode("utf-8").strip() or f"/home/{user}"
+                    target_base = r_home + target_base[1:]
+
+                local_p = Path(ws_path).resolve()
+                if (local_p / "src").is_dir():
+                    src_dir = local_p / "src"
+                    dest_dir = f"{target_base.rstrip('/')}/src"
+                else:
+                    src_dir = local_p
+                    dest_dir = f"{target_base.rstrip('/')}/src/{local_p.name}"
+
+                self.sig_log_received.emit(f"[SCP] Directorio origen local: {src_dir}\n")
+                self.sig_log_received.emit(f"[SCP] Directorio destino remoto: {dest_dir}\n")
+
+                sftp = client.open_sftp()
+                t0 = time.time()
+                file_count = sftp_upload_dir(sftp, src_dir, dest_dir, log_cb=lambda msg: self.sig_log_received.emit(msg))
+                elapsed = time.time() - t0
+
+                sftp.close()
+                client.close()
+
+                self.sig_log_received.emit(f"\n[SCP] Transferencia completada con éxito: {file_count} archivos transferidos en {elapsed:.1f}s.\n")
+                QtCore.QMetaObject.invokeMethod(
+                    self, "_show_info_box", QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.Q_ARG(str, "Transferencia SCP"),
+                    QtCore.Q_ARG(str, f"Se han transferido con éxito {file_count} archivos al robot en {elapsed:.1f} segundos.")
+                )
+            except Exception as e:
+                logger.exception("Error al transferir archivos vía SCP: %s", e)
+                self.sig_log_received.emit(f"\n[Error SCP] Fallo en la transferencia: {e}\n")
+                QtCore.QMetaObject.invokeMethod(
+                    self, "_show_warning_box", QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.Q_ARG(str, "Error SCP"),
+                    QtCore.Q_ARG(str, f"Error al enviar código al TurtleBot 4:\n\n{e}")
+                )
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_robot_compile(self):
+        robot_ip = self.ent_robot_ip.text().strip() if hasattr(self, "ent_robot_ip") else ""
+        if not robot_ip:
+            self._show_warning_box("TurtleBot 4", "Por favor introduce o escanea la dirección IP del TurtleBot 4 antes de compilar.")
+            return
+
+        user = self.ent_robot_user.text().strip() if hasattr(self, "ent_robot_user") else "ubuntu"
+        user = user or "ubuntu"
+        password = self.ent_robot_password.text().strip() if hasattr(self, "ent_robot_password") else "turtlebot4"
+        port = int(self.ent_robot_port.text().strip() or "22") if hasattr(self, "ent_robot_port") else 22
+        remote_ws = self.ent_robot_ws.text().strip() if hasattr(self, "ent_robot_ws") else "~/ros2_ws"
+        remote_ws = remote_ws or "~/ros2_ws"
+
+        self.tab_widget.setCurrentIndex(1)  # Tab Logs
+        self._append_log(f"\n=== [SSH] Iniciando compilación remota (colcon build) en TurtleBot 4 ({user}@{robot_ip}) ===\n")
+
+        def _worker():
+            try:
+                import paramiko
+            except ImportError:
+                self.sig_log_received.emit("\n[Error SSH] La librería 'paramiko' no está instalada en el entorno Python.\n")
+                QtCore.QMetaObject.invokeMethod(
+                    self, "_show_warning_box", QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.Q_ARG(str, "Dependencia faltante"),
+                    QtCore.Q_ARG(str, "Se requiere la librería 'paramiko' para compilar remotamente vía SSH.\nInstálala con: pip install paramiko")
+                )
+                return
+
+            try:
+                client = paramiko.SSHClient()
+                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                self.sig_log_received.emit(f"[SSH] Conectando a {user}@{robot_ip}:{port}...\n")
+                client.connect(robot_ip, port=port, username=user, password=password, timeout=10.0)
+
+                build_cmd = (
+                    f"bash -lc '"
+                    f"if [ -f /opt/ros/humble/setup.bash ]; then source /opt/ros/humble/setup.bash; "
+                    f"elif [ -f /opt/ros/jazzy/setup.bash ]; then source /opt/ros/jazzy/setup.bash; fi; "
+                    f"cd {remote_ws} && colcon build --symlink-install"
+                    f"'"
+                )
+                self.sig_log_received.emit(f"[SSH Ejecutando] {build_cmd}\n\n")
+
+                stdin, stdout, stderr = client.exec_command(build_cmd, get_pty=True)
+                for line in iter(stdout.readline, ""):
+                    self.sig_log_received.emit(line)
+
+                rc = stdout.channel.recv_exit_status()
+                client.close()
+
+                if rc == 0:
+                    self.sig_log_received.emit("\n[Robot Compilación] Compilación completada con ÉXITO.\n")
+                    QtCore.QMetaObject.invokeMethod(
+                        self, "_show_info_box", QtCore.Qt.ConnectionType.QueuedConnection,
+                        QtCore.Q_ARG(str, "Compilación en Robot"),
+                        QtCore.Q_ARG(str, "El espacio de trabajo en el TurtleBot 4 se ha compilado correctamente.")
+                    )
+                else:
+                    self.sig_log_received.emit(f"\n[Robot Compilación Error] La compilación terminó con código de error {rc}.\n")
+                    QtCore.QMetaObject.invokeMethod(
+                        self, "_show_warning_box", QtCore.Qt.ConnectionType.QueuedConnection,
+                        QtCore.Q_ARG(str, "Error de Compilación"),
+                        QtCore.Q_ARG(str, f"La compilación en el robot terminó con errores (código {rc}). Revisa los logs.")
+                    )
+            except Exception as e:
+                logger.exception("Error al compilar remotamente en el robot: %s", e)
+                self.sig_log_received.emit(f"\n[SSH Error] Excepción al conectar/compilar en el robot: {e}\n")
+                QtCore.QMetaObject.invokeMethod(
+                    self, "_show_warning_box", QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.Q_ARG(str, "Error SSH"),
+                    QtCore.Q_ARG(str, f"Error al ejecutar la compilación en el TurtleBot 4:\n\n{e}")
+                )
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_robot_open_terminal(self):
+        robot_ip = self.ent_robot_ip.text().strip() if hasattr(self, "ent_robot_ip") else ""
+        if not robot_ip:
+            self._show_warning_box("TurtleBot 4", "Por favor introduce o escanea la dirección IP del TurtleBot 4 antes de abrir la terminal.")
+            return
+
+        user = self.ent_robot_user.text().strip() if hasattr(self, "ent_robot_user") else "ubuntu"
+        user = user or "ubuntu"
+        port = self.ent_robot_port.text().strip() if hasattr(self, "ent_robot_port") else "22"
+        port_opt = f"-p {port}" if port and port != "22" else ""
+
+        try:
+            if sys.platform == "win32":
+                cmd = f'cmd.exe /c start "TurtleBot 4 SSH ({user}@{robot_ip})" ssh -o StrictHostKeyChecking=no {port_opt} {user}@{robot_ip}'
+                subprocess.Popen(cmd)
+                self._append_log(f"\n[Terminal Robot] Ventana SSH iniciada en nueva consola para {user}@{robot_ip}\n")
+            elif sys.platform == "darwin":
+                script = f'tell application "Terminal" to do script "ssh -o StrictHostKeyChecking=no {port_opt} {user}@{robot_ip}"'
+                subprocess.Popen(["osascript", "-e", script])
+                self._append_log(f"\n[Terminal Robot] Terminal SSH lanzada para {user}@{robot_ip} (macOS)\n")
+            else:
+                launched = False
+                for term in ["x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"]:
+                    if shutil.which(term):
+                        subprocess.Popen([term, "-e", f"ssh -o StrictHostKeyChecking=no {port_opt} {user}@{robot_ip}"])
+                        launched = True
+                        break
+                if launched:
+                    self._append_log(f"\n[Terminal Robot] Terminal SSH lanzada para {user}@{robot_ip} (Linux)\n")
+                else:
+                    self._show_warning_box("Terminal Robot", "No se encontró ningún emulador de terminal compatible en el sistema.")
+        except Exception as e:
+            logger.exception("Error al abrir terminal SSH: %s", e)
+            self._show_warning_box("Terminal Robot", f"No se pudo iniciar la terminal SSH:\n\n{e}")
 
     def closeEvent(self, event: QtGui.QCloseEvent):
         # Cancelar cualquier sondeo activo de Docker en segundo plano

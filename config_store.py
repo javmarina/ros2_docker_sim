@@ -28,7 +28,13 @@ class ConfigStore:
         "extra_args": "use_sim_time:=true",
         "force_rebuild": False,
         "auto_open_browser": True,
-        "dockerfile_content_hash": ""
+        "dockerfile_content_hash": "",
+        "robot_mac": "e4:5f:01:bd:05:1a",
+        "robot_ip": "",
+        "robot_user": "ubuntu",
+        "robot_password": "turtlebot4",
+        "robot_port": "22",
+        "robot_remote_ws": "~/turtlebot4_ws"
     }
 
     def __init__(self, fallback_dir: Optional[Path] = None):
