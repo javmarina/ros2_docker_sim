@@ -13,7 +13,7 @@ import logging
 import platform
 import subprocess
 from pathlib import Path
-from typing import Tuple, Callable, Optional, List
+from typing import Tuple, Callable, Optional, List, Dict
 from enum import Enum
 
 logger = logging.getLogger("docker_service")
@@ -498,6 +498,7 @@ class DockerService:
             "docker", "run", "--rm",
             "--name", container_name,
             "-p", f"{web_port}:6080",
+            "--ipc=host",
             "-e", f"ROS_DOMAIN_ID={domain_id}",
             "-e", f"ROBOT_MODEL={robot_model}",
             "-e", "RCUTILS_COLORIZED_OUTPUT=1",
@@ -509,6 +510,7 @@ class DockerService:
             "-e", "GALLIUM_DRIVER=llvmpipe",
             "-e", "QT_QPA_PLATFORM=xcb",
             "-e", "OGRE_RTT_MODE=Copy",
+            "-v", "ros2_jazzy_gz_cache:/root/.gz",
             "-v", "ros2_jazzy_build_cache:/ros2_ws/build",
             "-v", "ros2_jazzy_install_cache:/ros2_ws/install",
             "-v", "ros2_jazzy_log_cache:/ros2_ws/log",
@@ -521,6 +523,7 @@ class DockerService:
 
         # Comando interno de inicialización de display virtual + servidor noVNC + ROS2
         final_shell_cmd = (
+            "rm -rf /dev/shm/fastrtps* >/dev/null 2>&1; "
             "Xvfb :99 -screen 0 1600x900x24 >/dev/null 2>&1 & "
             "sleep 1 && "
             "openbox >/dev/null 2>&1 & "

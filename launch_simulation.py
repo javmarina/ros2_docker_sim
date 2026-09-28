@@ -217,6 +217,22 @@ RUN echo "=== [1/3] Actualizando repositorios APT ===" && \
     && rm -rf /var/lib/apt/lists/*
 
 ENV ROBOT_MODEL=turtlebot4
+
+# Pre-descarga de modelos 3D de Gazebo Fuel para mundos de simulacion (Warehouse, Depot)
+RUN /bin/bash -c "source /opt/ros/jazzy/setup.bash && \
+    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/Warehouse' || true && \
+    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/Depot' || true && \
+    gz fuel download -u 'https://fuel.gazebosim.org/1.0/MovAi/models/pallet_box_mobile' || true && \
+    gz fuel download -u 'https://fuel.gazebosim.org/1.0/MovAi/models/shelf' || true && \
+    gz fuel download -u 'https://fuel.gazebosim.org/1.0/MovAi/models/shelf_big' || true && \
+    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/Chair' || true && \
+    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/CoffeeTable' || true && \
+    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/FemaleVisitorSit' || true && \
+    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/Jersey Barrier' || true && \
+    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/MaleVisitorOnPhone' || true && \
+    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/foldable_chair' || true && \
+    gz fuel download -u 'https://fuel.gazebosim.org/1.0/plateau/models/Casual female' || true"
+
 EXPOSE 6080
 WORKDIR /ros2_ws
 

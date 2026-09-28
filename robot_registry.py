@@ -90,12 +90,15 @@ def _build_turtlebot4_command(scenario_id: str, world_name: str, extra_args: str
     env = _build_env_prefix(force_rebuild)
     args = extra_args.strip()
 
+    map_arg = f"map:=/opt/ros/jazzy/share/turtlebot4_navigation/maps/{world_name}.yaml" if world_name in ["warehouse", "depot", "maze"] else ""
+
     if scenario_id == "nav2":
-        return f"{env} && ros2 launch turtlebot4_gz_bringup turtlebot4_gz.launch.py world:={world_name} nav2:=true rviz:=true {args}"
+        loc_part = f"localization:=true {map_arg}".strip()
+        return f"{env} && ros2 launch turtlebot4_gz_bringup turtlebot4_gz.launch.py world:={world_name} nav2:=true {loc_part} rviz:=true {args}".strip()
     elif scenario_id == "slam":
-        return f"{env} && ros2 launch turtlebot4_gz_bringup turtlebot4_gz.launch.py world:={world_name} slam:=true rviz:=true {args}"
+        return f"{env} && ros2 launch turtlebot4_gz_bringup turtlebot4_gz.launch.py world:={world_name} slam:=true nav2:=true rviz:=true {args}".strip()
     elif scenario_id == "sim_only":
-        return f"{env} && ros2 launch turtlebot4_gz_bringup turtlebot4_gz.launch.py world:={world_name} {args}"
+        return f"{env} && ros2 launch turtlebot4_gz_bringup turtlebot4_gz.launch.py world:={world_name} {args}".strip()
     elif scenario_id == "rviz2":
         return f"{env} && ros2 launch turtlebot4_viz view_robot.launch.py"
     elif scenario_id == "teleop":
