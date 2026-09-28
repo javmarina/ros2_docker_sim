@@ -242,6 +242,42 @@ RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc \
 CMD ["/bin/bash"]
 """
 
+def ensure_dockerfile_sync(workspace_dir: Path) -> Path:
+    """
+    Garantiza que el Dockerfile en disco esté exactamente sincronizado con DOCKERFILE_CONTENT.
+    Si existe 'Dockerfile' en la raíz del workspace (modo desarrollo/git), lo actualiza si difiere.
+    Si no existe (modo ejecutable empaquetado), lo crea dentro de '.docker_build/Dockerfile'.
+    Inserta la etiqueta LABEL con el hash calculado antes de CMD para persistencia nativa en la imagen.
+    Devuelve la ruta al directorio de construcción (build_dir).
+    """
+    dockerfile_root = workspace_dir / "Dockerfile"
+    if dockerfile_root.exists():
+        build_dir = workspace_dir
+        target_file = dockerfile_root
+    else:
+        build_dir = workspace_dir / ".docker_build"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        target_file = build_dir / "Dockerfile"
+
+    content_hash = DockerService.compute_dockerfile_hash(DOCKERFILE_CONTENT)
+    effective_content = DOCKERFILE_CONTENT
+    label_line = f'LABEL {DockerService.DOCKERFILE_HASH_LABEL}="{content_hash}"'
+    if label_line not in effective_content:
+        cmd_marker = 'CMD ["/bin/bash"]'
+        if cmd_marker in effective_content:
+            effective_content = effective_content.replace(cmd_marker, f'{label_line}\n\n{cmd_marker}')
+        else:
+            effective_content += f'\n{label_line}\n'
+
+    try:
+        current_content = target_file.read_text(encoding="utf-8") if target_file.exists() else ""
+        if current_content.strip() != effective_content.strip():
+            target_file.write_text(effective_content, encoding="utf-8")
+    except Exception as e:
+        logger.warning("No se pudo sincronizar Dockerfile en %s: %s", target_file, e)
+
+    return build_dir
+
 GUIDE_MARKDOWN = """# Guía de Simulación y Navegación ROS 2 Jazzy
 
 Este entorno ejecuta **ROS 2 Jazzy**, **Gazebo Sim** y **Navigation2 (Nav2)** dentro de un contenedor Docker con interfaz gráfica accesible directamente desde el navegador web (noVNC).
@@ -1094,6 +1130,10 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             else:
                 self.tab_widget.setTabIcon(i, get_themed_icon(key, color=p["tab_icon_normal"]))
 
+        # Al acceder a la pestaña Avanzada (índice 2), refrescar estado de imagen Docker
+        if current_index == 2:
+            self._update_docker_image_ui_state()
+
     def _build_config_tab(self, parent: QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(parent)
         layout.setContentsMargins(16, 14, 16, 14)
@@ -1377,6 +1417,10 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.btn_prep_image.setIconSize(QtCore.QSize(16, 16))
         self.btn_prep_image.clicked.connect(self._on_pull_or_build_image)
         maint_row.addWidget(self.btn_prep_image)
+
+        self.lbl_image_status = QtWidgets.QLabel("")
+        self.lbl_image_status.setProperty("note", True)
+        maint_row.addWidget(self.lbl_image_status)
 
         self.btn_clean_cache = QtWidgets.QPushButton("Limpiar volúmenes de caché")
         self.btn_clean_cache.setIconSize(QtCore.QSize(16, 16))
@@ -1789,6 +1833,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self.btn_docker.setStyleSheet("")  # Regla QSS global #btnDocker
             self.btn_docker.setEnabled(True)
             self._check_container_live_status()
+            self._update_docker_image_ui_state()
         else:
             self._style_badge(self.lbl_docker_badge, "● Docker detenido", "warning")
             self.btn_docker.setText("Iniciar Docker")
@@ -2030,7 +2075,50 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self.cbo_scenario.setCurrentIndex(idx)
         self._on_launch_simulation()
 
-    def _on_launch_simulation(self):
+    @QtCore.Slot()
+    def _prompt_initial_image_build(self):
+        QtWidgets.QMessageBox.information(
+            self,
+            "Preparación de Imagen Docker",
+            f"La imagen '{COURSE_IMAGE_NAME}' no existe localmente.\n\n"
+            "Se procederá a compilarla. Este proceso puede tardar unos minutos la primera vez.\n"
+            "Al finalizar, la simulación se iniciará automáticamente."
+        )
+        self._on_pull_or_build_image(
+            on_success_callback=lambda: self._on_launch_simulation(skip_update_check=True)
+        )
+
+    @QtCore.Slot()
+    def _prompt_update_and_rebuild_image(self):
+        msg_box = QtWidgets.QMessageBox(self)
+        msg_box.setWindowTitle("Actualización del Entorno Docker")
+        msg_box.setIcon(QtWidgets.QMessageBox.Icon.Information)
+        msg_box.setText(
+            "Se han detectado actualizaciones en la configuración del contenedor (DOCKERFILE_CONTENT).\n\n"
+            "¿Deseas actualizar la imagen Docker ahora?\n\n"
+            "• Utilizará la caché local de Docker (solo descargará/compilará las capas nuevas).\n"
+            "• La simulación se iniciará automáticamente al completar la actualización."
+        )
+        btn_update = msg_box.addButton("Actualizar ahora (Recomendado)", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        btn_skip = msg_box.addButton("Iniciar sin actualizar", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        btn_cancel = msg_box.addButton("Cancelar", QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
+        msg_box.setDefaultButton(btn_update)
+        msg_box.exec()
+
+        clicked = msg_box.clickedButton()
+        if clicked == btn_update:
+            self._append_log("[INFO] Iniciando actualización de capas Docker...\n")
+            self._on_pull_or_build_image(
+                on_success_callback=lambda: self._on_launch_simulation(skip_update_check=True)
+            )
+        elif clicked == btn_skip:
+            self._append_log("[AVISO] Continuando con la imagen actual sin actualizar capas.\n")
+            self._on_launch_simulation(skip_update_check=True)
+        else:
+            self._append_log("[INFO] Inicio cancelado por el usuario.\n")
+            self._set_progress(0.0, "Cancelado")
+
+    def _on_launch_simulation(self, skip_update_check: bool = False):
         if self._docker_state == DockerState.STARTING:
             self._show_warning_box("Docker", "Docker Desktop se está iniciando en este momento.\nPor favor espera a que finalice el arranque.")
             return
@@ -2080,7 +2168,22 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                     self._append_log(f"Imagen '{image_name}' no encontrada localmente. Iniciando preparación...\n")
                     self._is_launching_sim = False
                     QtCore.QMetaObject.invokeMethod(self, "_update_action_buttons_state", QtCore.Qt.ConnectionType.QueuedConnection)
-                    self._on_pull_or_build_image()
+                    QtCore.QMetaObject.invokeMethod(self, "_prompt_initial_image_build", QtCore.Qt.ConnectionType.QueuedConnection)
+                    return
+
+                # Comprobar si la imagen existente requiere actualización incremental de capas
+                expected_hash = DockerService.compute_dockerfile_hash(DOCKERFILE_CONTENT)
+                stored_hash = self.config_store.get("dockerfile_content_hash")
+                is_up_to_date = DockerService.is_image_up_to_date(
+                    image_name, expected_hash, fallback_hash=stored_hash
+                )
+                if not is_up_to_date and not skip_update_check:
+                    self._append_log(
+                        f"[AVISO] Se detectaron modificaciones en DOCKERFILE_CONTENT pendientes de aplicar a la imagen '{image_name}'.\n"
+                    )
+                    self._is_launching_sim = False
+                    QtCore.QMetaObject.invokeMethod(self, "_update_action_buttons_state", QtCore.Qt.ConnectionType.QueuedConnection)
+                    QtCore.QMetaObject.invokeMethod(self, "_prompt_update_and_rebuild_image", QtCore.Qt.ConnectionType.QueuedConnection)
                     return
 
                 DockerService.stop_container(DEFAULT_CONTAINER_NAME)
@@ -2388,26 +2491,25 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _on_pull_or_build_image(self):
+    def _on_pull_or_build_image(self, on_success_callback: Optional[Callable[[], None]] = None):
         image_name = COURSE_IMAGE_NAME
         self.tab_widget.setCurrentIndex(1)  # Logs
-        self._append_log(f"\n--- Preparando imagen de la asignatura: {image_name} ---\n")
+        self._append_log(f"\n--- Preparando / actualizando imagen Docker: {image_name} ---\n")
 
         self.btn_prep_image.setEnabled(False)
-        self._set_progress(-1, "Comprobando imagen...")
+        self._set_progress(-1, "Comprobando imagen y capas...")
 
         workspace_dir = Path(__file__).parent.resolve()
-        dockerfile_root = workspace_dir / "Dockerfile"
-        if dockerfile_root.exists():
-            build_dir = workspace_dir
-        else:
-            build_dir = workspace_dir / ".docker_build"
-            build_dir.mkdir(parents=True, exist_ok=True)
-            with open(build_dir / "Dockerfile", "w", encoding="utf-8") as f:
-                f.write(DOCKERFILE_CONTENT)
+        build_dir = ensure_dockerfile_sync(workspace_dir)
+
+        expected_hash = DockerService.compute_dockerfile_hash(DOCKERFILE_CONTENT)
+        labels = {DockerService.DOCKERFILE_HASH_LABEL: expected_hash}
+
+        self._pending_post_build_callback = on_success_callback
 
         def _worker():
             self._append_log(f"Construyendo imagen desde: {build_dir}\n")
+            self._append_log("Utilizando caché local de Docker (solo se compilarán las capas modificadas)...\n")
             success, msg = DockerService.build_image_stream(
                 str(build_dir),
                 image_name,
@@ -2416,7 +2518,8 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                     QtCore.Q_ARG(float, pct),
                     QtCore.Q_ARG(str, txt)
                 ),
-                self._append_log
+                self._append_log,
+                labels=labels
             )
             QtCore.QMetaObject.invokeMethod(
                 self, "_on_build_image_finished", QtCore.Qt.ConnectionType.QueuedConnection,
@@ -2430,12 +2533,90 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     def _on_build_image_finished(self, success: bool, msg: str):
         self.btn_prep_image.setEnabled(True)
         self._set_progress(100.0 if success else 0.0, "Listo" if success else "Error")
+        cb = getattr(self, "_pending_post_build_callback", None)
+        self._pending_post_build_callback = None
+
         if success:
+            expected_hash = DockerService.compute_dockerfile_hash(DOCKERFILE_CONTENT)
+            self.config_store.set("dockerfile_content_hash", expected_hash)
             self._append_log(f"\n[ÉXITO] {msg}\n")
-            QtWidgets.QMessageBox.information(self, "Imagen", f"Imagen '{COURSE_IMAGE_NAME}' lista.")
+            self._update_docker_image_ui_state()
+
+            if cb:
+                self._append_log("[INFO] Reanudando lanzamiento tras actualizar la imagen...\n")
+                QtCore.QTimer.singleShot(300, cb)
+            else:
+                QtWidgets.QMessageBox.information(
+                    self, "Imagen Docker",
+                    f"Imagen '{COURSE_IMAGE_NAME}' lista y actualizada con éxito."
+                )
         else:
             self._append_log(f"\n[ERROR] {msg}\n")
+            self._update_docker_image_ui_state()
             QtWidgets.QMessageBox.critical(self, "Error", f"Error al preparar imagen:\n{msg}")
+
+    def _update_docker_image_ui_state(self):
+        """Actualiza el texto y estado del botón y etiqueta de la imagen Docker en la pestaña Avanzada."""
+        if not hasattr(self, "lbl_image_status"):
+            return
+
+        def _check_worker():
+            installed, _ = DockerService.check_docker_installed()
+            running, _ = DockerService.check_docker_running()
+            if not installed or not running:
+                QtCore.QMetaObject.invokeMethod(
+                    self, "_apply_docker_image_ui_state", QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.Q_ARG(str, "docker_down"),
+                    QtCore.Q_ARG(str, "Docker no disponible")
+                )
+                return
+
+            if not DockerService.is_image_available(COURSE_IMAGE_NAME):
+                QtCore.QMetaObject.invokeMethod(
+                    self, "_apply_docker_image_ui_state", QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.Q_ARG(str, "not_installed"),
+                    QtCore.Q_ARG(str, "Imagen no encontrada localmente")
+                )
+                return
+
+            expected_hash = DockerService.compute_dockerfile_hash(DOCKERFILE_CONTENT)
+            up_to_date = DockerService.is_image_up_to_date(
+                COURSE_IMAGE_NAME,
+                expected_hash,
+                fallback_hash=self.config_store.get("dockerfile_content_hash")
+            )
+            if up_to_date:
+                QtCore.QMetaObject.invokeMethod(
+                    self, "_apply_docker_image_ui_state", QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.Q_ARG(str, "up_to_date"),
+                    QtCore.Q_ARG(str, "Imagen al día (capas sincronizadas)")
+                )
+            else:
+                QtCore.QMetaObject.invokeMethod(
+                    self, "_apply_docker_image_ui_state", QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.Q_ARG(str, "update_available"),
+                    QtCore.Q_ARG(str, "Actualización disponible (capas modificadas)")
+                )
+
+        threading.Thread(target=_check_worker, daemon=True).start()
+
+    @QtCore.Slot(str, str)
+    def _apply_docker_image_ui_state(self, state_key: str, status_text: str):
+        if not hasattr(self, "lbl_image_status"):
+            return
+        self.lbl_image_status.setText(status_text)
+        if state_key == "up_to_date":
+            self.lbl_image_status.setStyleSheet("color: #4CAF50; font-weight: bold;")
+            self.btn_prep_image.setText("Reconstruir imagen Docker")
+        elif state_key == "update_available":
+            self.lbl_image_status.setStyleSheet("color: #FF9800; font-weight: bold;")
+            self.btn_prep_image.setText("Actualizar imagen Docker (Caché)")
+        elif state_key == "not_installed":
+            self.lbl_image_status.setStyleSheet("color: #F44336; font-weight: bold;")
+            self.btn_prep_image.setText("Construir imagen Docker")
+        else:
+            self.lbl_image_status.setStyleSheet("")
+            self.btn_prep_image.setText("Reconstruir / preparar imagen Docker")
 
     # --- Consola de Logs y Control de Auto-Scroll ---
 

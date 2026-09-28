@@ -27,7 +27,8 @@ class ConfigStore:
         "web_port": "6080",
         "extra_args": "use_sim_time:=true",
         "force_rebuild": False,
-        "auto_open_browser": True
+        "auto_open_browser": True,
+        "dockerfile_content_hash": ""
     }
 
     def __init__(self, fallback_dir: Optional[Path] = None):

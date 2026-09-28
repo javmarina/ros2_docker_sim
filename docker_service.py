@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 from typing import Tuple, Callable, Optional, List, Dict
 from enum import Enum
+import hashlib
 
 logger = logging.getLogger("docker_service")
 
@@ -38,6 +39,7 @@ class DockerState(Enum):
 
 
 DEFAULT_CONTAINER_NAME = "ros2_jazzy_nav_sim"
+DOCKERFILE_HASH_LABEL = "org.nav_course.dockerfile_hash"
 COURSE_IMAGE_NAME = "ros2-jazzy-nav-course:latest"
 DEFAULT_NOVNC_PORT = 6080
 WIN32_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -46,6 +48,8 @@ WIN32_NEW_CONSOLE = subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" els
 
 class DockerService:
     """Encapsula todas las operaciones con el daemon de Docker y ejecución de procesos."""
+
+    DOCKERFILE_HASH_LABEL = DOCKERFILE_HASH_LABEL
 
     @staticmethod
     def get_host_os() -> str:
@@ -330,6 +334,76 @@ class DockerService:
             return False
 
     @staticmethod
+    def compute_dockerfile_hash(content: str) -> str:
+        """
+        Calcula un hash SHA256 determinista del contenido del Dockerfile.
+        Normaliza saltos de línea (CRLF/LF) y descarta líneas en blanco
+        y comentarios iniciales para evitar falsos positivos de reconstrucción.
+        """
+        normalized_lines = []
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or line.startswith(f"LABEL {DOCKERFILE_HASH_LABEL}"):
+                continue
+            normalized_lines.append(line)
+        normalized_text = "\n".join(normalized_lines)
+        return hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def get_image_label(image_name: str, label_name: str, timeout: float = 5.0) -> Optional[str]:
+        """Obtiene el valor de una etiqueta de metadatos de una imagen Docker."""
+        try:
+            cmd = [
+                "docker", "inspect",
+                "--format", f'{{{{index .Config.Labels "{label_name}"}}}}',
+                image_name
+            ]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+                creationflags=WIN32_NO_WINDOW
+            )
+            if result.returncode == 0:
+                val = result.stdout.strip()
+                if val and val != "<no value>":
+                    return val
+            return None
+        except Exception:
+            return None
+
+    @classmethod
+    def is_image_up_to_date(
+        cls,
+        image_name: str = COURSE_IMAGE_NAME,
+        expected_hash: str = "",
+        fallback_hash: Optional[str] = None
+    ) -> bool:
+        """
+        Verifica si la imagen Docker local existe y contiene todas las capas esperadas.
+        Comprueba la etiqueta de metadatos embebida en la imagen Docker
+        o, alternativamente, el fallback_hash guardado en la configuración.
+        """
+        if not expected_hash:
+            return cls.is_image_available(image_name)
+        if not cls.is_image_available(image_name):
+            return False
+
+        # Comprobar etiqueta Docker de la imagen
+        actual_label = cls.get_image_label(image_name, DOCKERFILE_HASH_LABEL)
+        if actual_label and actual_label == expected_hash:
+            return True
+
+        # Fallback a hash persistido en la configuración local
+        if fallback_hash and fallback_hash == expected_hash:
+            return True
+            
+
+        return False
+
+    @staticmethod
     def stop_container(container_name: str = DEFAULT_CONTAINER_NAME, timeout: float = 15.0) -> Tuple[bool, str]:
         """Detiene y elimina de forma inmediata el contenedor para evitar bloqueos."""
         logger.info("Deteniendo contenedor '%s'...", container_name)
@@ -607,14 +681,34 @@ class DockerService:
         dockerfile_dir: str,
         tag_name: str,
         progress_cb: Callable[[float, str], None],
-        log_cb: Callable[[str], None]
+        log_cb: Callable[[str], None],
+        labels: Optional[Dict[str, str]] = None
     ) -> Tuple[bool, str]:
-        """Construye una imagen Docker a partir de un Dockerfile con estimación de progreso."""
-        cmd = ["docker", "build", "-t", tag_name, dockerfile_dir]
+        """Construye una imagen Docker a partir de un Dockerfile con estimación de progreso y caché inteligente."""
+        cmd = ["docker", "build", "--progress=plain", "-t", tag_name]
+        
+        # Nota: Docker BuildKit aprovecha automáticamente la caché de capas local existente para la imagen.
+        if labels:
+            for k, v in labels.items():
+                cmd.extend(["--label", f"{k}={v}"])
+
+        cmd.append(dockerfile_dir)
         log_cb(f"Ejecutando: {' '.join(cmd)}\n")
 
         total_steps = 10
         current_step = 0
+
+        def safe_log(text: str):
+            try:
+                log_cb(text)
+            except Exception:
+                pass
+
+        def safe_progress(pct: float, text: str):
+            try:
+                progress_cb(pct, text)
+            except Exception:
+                pass
 
         try:
             process = subprocess.Popen(
@@ -632,29 +726,40 @@ class DockerService:
             for line in iter(process.stdout.readline, ''):
                 clean_line = line.strip()
                 if clean_line:
-                    log_cb(clean_line + "\n")
+                    safe_log(clean_line + "\n")
 
                 step_match = re.search(r"Step\s+(\d+)/(\d+)", clean_line, re.IGNORECASE)
                 if step_match:
                     current_step = int(step_match.group(1))
                     total_steps = int(step_match.group(2))
                     pct = (current_step / total_steps) * 100.0
-                    progress_cb(pct, f"Construyendo imagen - Paso {current_step}/{total_steps}...")
+                    safe_progress(pct, f"Construyendo imagen - Paso {current_step}/{total_steps}...")
                 elif clean_line.startswith("#"):
                     bk_match = re.search(r"\[(\d+)/(\d+)\]", clean_line)
                     if bk_match:
                         current_step = int(bk_match.group(1))
                         total_steps = int(bk_match.group(2))
                         pct = (current_step / total_steps) * 100.0
-                        progress_cb(pct, f"BuildKit - Paso {current_step}/{total_steps}...")
+                        safe_progress(pct, f"BuildKit - Paso {current_step}/{total_steps}...")
+                    elif current_step > 0:
+                        pct = (current_step / total_steps) * 100.0
+                        if "===" in clean_line:
+                            stage = clean_line.split("===")[1].strip() if len(clean_line.split("===")) > 1 else clean_line
+                            safe_progress(pct, f"Paso {current_step}/{total_steps} - {stage}")
+                        elif any(k in clean_line for k in ("Unpacking", "Setting up", "Preparing to unpack")):
+                            tokens = clean_line.split()
+                            pkg = tokens[-1].strip("().") if tokens else ""
+                            safe_progress(pct, f"Paso {current_step}/{total_steps} - Instalando: {pkg}")
+                        elif "Get:" in clean_line or "Fetch" in clean_line:
+                            safe_progress(pct, f"Paso {current_step}/{total_steps} - Descargando paquetes...")
 
             process.stdout.close()
             return_code = process.wait()
             if return_code == 0:
-                progress_cb(100.0, f"Imagen '{tag_name}' construida con éxito.")
+                safe_progress(100.0, f"Imagen '{tag_name}' construida con éxito.")
                 return True, "Construcción completada."
             else:
-                progress_cb(0.0, "Fallo en la construcción.")
+                safe_progress(0.0, "Fallo en la construcción.")
                 return False, f"La construcción finalizó con código {return_code}."
         except Exception as e:
             return False, str(e)
