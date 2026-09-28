@@ -4,6 +4,7 @@ Interfaz gráfica moderna, nativa de alta resolución (High-DPI) y modular con P
 """
 
 import os
+import shutil
 import re
 import sys
 import logging
@@ -1220,12 +1221,17 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.btn_topics_info = QtWidgets.QPushButton("Topics con tipo (ros2 topic list -t)")
         self.btn_topics_info.setIconSize(QtCore.QSize(16, 16))
         self.btn_topics_info.clicked.connect(lambda: self._execute_quick_command("ros2 topic list -t"))
-        grid.addWidget(self.btn_topics_info, 1, 0)
+        grid.addWidget(self.btn_topics_info, 1, 0, 1, 2)
 
         self.btn_compile = QtWidgets.QPushButton("Compilar workspace (colcon build)")
         self.btn_compile.setIconSize(QtCore.QSize(16, 16))
         self.btn_compile.clicked.connect(self._on_compile_workspace)
-        grid.addWidget(self.btn_compile, 1, 1)
+        grid.addWidget(self.btn_compile, 2, 0)
+
+        self.btn_clean_compile = QtWidgets.QPushButton("Limpiar compilación (clean build)")
+        self.btn_clean_compile.setIconSize(QtCore.QSize(16, 16))
+        self.btn_clean_compile.clicked.connect(self._on_clean_compilation)
+        grid.addWidget(self.btn_clean_compile, 2, 1)
 
         cmd_layout.addLayout(grid)
         layout.addWidget(cmd_card)
@@ -2073,6 +2079,100 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         else:
             self._append_log(f"\n[Compilación con errores (código {rc})]\n")
             QtWidgets.QMessageBox.critical(self, "Compilación", f"La compilación terminó con código de error {rc}.")
+
+    def _on_clean_compilation(self):
+        if self._docker_state == DockerState.STARTING:
+            self._show_warning_box("Docker", "Docker Desktop se está iniciando en este momento.\nPor favor espera a que el servicio esté listo.")
+            return
+
+        running, err = DockerService.check_docker_running(timeout=3.0)
+        if not running:
+            QtWidgets.QMessageBox.critical(self, "Docker", f"Docker no está en ejecución:\n\n{err}")
+            return
+
+        answer = QtWidgets.QMessageBox.question(
+            self,
+            "Limpiar compilación",
+            "¿Deseas limpiar todos los archivos y caché de compilación del workspace?\n\n"
+            "Se eliminarán los directorios 'build', 'install' y 'log' para compilar desde cero.",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+        )
+        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+
+        ws_path = self.ent_ws_path.text().strip()
+        self.tab_widget.setCurrentIndex(1)  # Tab Logs
+        self._append_log("\n=== Limpiando archivos y caché de compilación del workspace... ===\n")
+
+        def _worker():
+            try:
+                # 1. Detener compilación activa si existiese
+                if self.compile_runner and self.compile_runner.isRunning():
+                    self._append_log("[Aviso] Deteniendo compilador colcon en curso...\n")
+                    self.compile_runner.terminate_process()
+                    self.compile_runner.wait(1000)
+
+                # 2. Si el contenedor de simulación está activo, limpiar directorios internos
+                is_running = DockerService.is_container_running(DEFAULT_CONTAINER_NAME)
+                if is_running:
+                    self._append_log("[Docker] Contenedor de simulación activo detectado. Vaciando directorios /ros2_ws/{build,install,log}...\n")
+                    clean_script = (
+                        "find /ros2_ws/build -mindepth 1 -delete 2>/dev/null || rm -rf /ros2_ws/build/*; "
+                        "find /ros2_ws/install -mindepth 1 -delete 2>/dev/null || rm -rf /ros2_ws/install/*; "
+                        "find /ros2_ws/log -mindepth 1 -delete 2>/dev/null || rm -rf /ros2_ws/log/*"
+                    )
+                    exec_cmd = [
+                        "docker", "exec", DEFAULT_CONTAINER_NAME,
+                        "/bin/bash", "-c", clean_script
+                    ]
+                    res = subprocess.run(
+                        exec_cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        check=False,
+                        timeout=15.0,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                    )
+                    if res.returncode == 0:
+                        self._append_log("[Docker] Directorios de compilación internos vaciados correctamente.\n")
+                    else:
+                        self._append_log(f"[Docker Aviso] docker exec terminó con código {res.returncode}: {res.stderr}\n")
+                else:
+                    # Contenedor detenido: eliminar volúmenes persistentes de Docker directamente
+                    self._append_log("[Docker] Eliminando volúmenes de caché persistentes de colcon (ros2_jazzy_*)...\n")
+                    ok, msg = DockerService.clean_build_volumes()
+                    self._append_log(f"[Docker] {msg}\n")
+
+                # 3. Limpiar carpetas locales de build/install/log en el workspace anfitrión si existen
+                if ws_path and os.path.exists(ws_path):
+                    p = Path(ws_path)
+                    for sub in ("build", "install", "log"):
+                        host_sub = p / sub
+                        if host_sub.exists() and host_sub.is_dir():
+                            try:
+                                shutil.rmtree(host_sub, ignore_errors=True)
+                                self._append_log(f"[Workspace local] Carpeta '{sub}' eliminada en {p}.\n")
+                            except Exception as e:
+                                self._append_log(f"[Aviso] No se pudo eliminar '{sub}' local: {e}\n")
+
+                self._append_log("\n[Compilación limpia] Limpieza finalizada. El workspace está listo para compilar desde cero.\n")
+                QtCore.QMetaObject.invokeMethod(
+                    self, "_show_info_box", QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.Q_ARG(str, "Limpiar compilación"),
+                    QtCore.Q_ARG(str, "Compilación limpia finalizada.\nTodos los archivos y cachés de compilación han sido eliminados.")
+                )
+            except Exception as ex:
+                err_msg = f"Error al limpiar la compilación: {ex}"
+                logger.error(err_msg, exc_info=True)
+                self._append_log(f"\n[Error] {err_msg}\n")
+                QtCore.QMetaObject.invokeMethod(
+                    self, "_show_warning_box", QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.Q_ARG(str, "Error"),
+                    QtCore.Q_ARG(str, err_msg)
+                )
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _on_clean_build_cache(self):
         if self._docker_state == DockerState.STARTING:
