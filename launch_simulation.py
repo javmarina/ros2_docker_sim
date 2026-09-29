@@ -17,6 +17,7 @@ import webbrowser
 import subprocess
 import threading
 import socket
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Callable
@@ -689,6 +690,8 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self._last_robot_scan_data: Optional[Tuple[bool, str, bool, str, str]] = None
         self._is_scanning_robot: bool = False
         self._has_checked_robot_once: bool = False
+        self._robot_detected: bool = False
+        self._last_detected_robot_ip: str = ""
 
         # Conexiones de señales Qt entre hilos
         self.sig_manual_update_result.connect(self._on_manual_update_result)
@@ -1057,6 +1060,23 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 background-color: #1d4ed8;
             }}
             #btnLaunch:disabled {{
+                background-color: {p['bg_button']};
+                color: {p['text_muted']};
+                border: 1px solid {p['border']};
+            }}
+            #btnRobotTerminal {{
+                background-color: #2563eb;
+                color: #ffffff;
+                font-weight: 700;
+                padding: 7px 14px;
+                border: 1px solid #2563eb;
+                border-radius: 6px;
+            }}
+            #btnRobotTerminal:hover {{
+                background-color: #1d4ed8;
+                border-color: #1d4ed8;
+            }}
+            #btnRobotTerminal:disabled {{
                 background-color: {p['bg_button']};
                 color: {p['text_muted']};
                 border: 1px solid {p['border']};
@@ -1714,7 +1734,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.ent_robot_ip = QtWidgets.QLineEdit()
         self.ent_robot_ip.setPlaceholderText("ej. 192.168.1.142")
         self.ent_robot_ip.setFixedWidth(160)
-        self.ent_robot_ip.textChanged.connect(self._save_current_settings)
+        self.ent_robot_ip.textChanged.connect(self._on_robot_ip_changed)
         ip_row.addWidget(self.ent_robot_ip)
 
         self.btn_scan_robot = QtWidgets.QPushButton("Buscar / Escanear robot")
@@ -1822,11 +1842,12 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         # 3. Abrir terminal
         self.btn_robot_terminal = QtWidgets.QPushButton("Abrir terminal en el robot (SSH)")
         self.btn_robot_terminal.setIconSize(QtCore.QSize(16, 16))
-        self.btn_robot_terminal.setStyleSheet("background-color: #2563eb; color: #ffffff; font-weight: 700; padding: 7px 14px;")
+        self.btn_robot_terminal.setObjectName("btnRobotTerminal")
         self.btn_robot_terminal.clicked.connect(self._on_robot_open_terminal)
         btn_grid.addWidget(self.btn_robot_terminal, 1, 0, 1, 2)
 
         ops_layout.addLayout(btn_grid)
+        self._update_robot_action_buttons()
 
         lbl_ops_info = QtWidgets.QLabel(
             "• 'Enviar código (SCP)': Sincroniza la carpeta 'src' del workspace local con el workspace remoto en el TurtleBot 4.\n"
@@ -3198,6 +3219,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         if getattr(self, "_is_scanning_robot", False):
             return
         self._is_scanning_robot = True
+        self._robot_detected = False
+        self._update_robot_action_buttons()
+
+        manual_ip = self.ent_robot_ip.text().strip() if hasattr(self, "ent_robot_ip") else ""
+
         if hasattr(self, "btn_scan_robot"):
             self.btn_scan_robot.setEnabled(False)
             self.btn_scan_robot.setText("Buscando en la red...")
@@ -3205,6 +3231,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self._style_badge(self.lbl_wifi_badge, "Verificando...", "neutral")
         if hasattr(self, "lbl_robot_badge"):
             self._style_badge(self.lbl_robot_badge, "Escaneando...", "neutral")
+            self.lbl_wifi_desc.setText("")
             self.lbl_robot_desc.setText("Consultando tabla ARP y barriendo la subred local...")
 
         def _worker():
@@ -3219,6 +3246,9 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 if not robot_ip and deep_sweep and local_ip and local_ip != "127.0.0.1":
                     subnet_sweep(local_ip, timeout=0.35)
                     robot_ip = get_ip_from_mac(target_mac)
+
+                if not robot_ip and manual_ip and ping_device(manual_ip, timeout=0.5):
+                    robot_ip = manual_ip
 
                 robot_found = bool(robot_ip)
                 msg = f"SSID: {ssid or 'N/A'} | Robot IP: {robot_ip or 'No encontrado'}"
@@ -3257,6 +3287,8 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         # 2. Estado del Robot y MAC
         target_mac = self.config_store.get("robot_mac", DEFAULT_TURTLEBOT4_MAC)
         if robot_found and robot_ip:
+            self._robot_detected = True
+            self._last_detected_robot_ip = robot_ip
             self._style_badge(self.lbl_robot_badge, "Localizado", "success")
             self.lbl_robot_desc.setText(f"TurtleBot 4 detectado en la IP {robot_ip} (MAC: {target_mac}).")
             if hasattr(self, "ent_robot_ip"):
@@ -3265,13 +3297,49 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                     self.ent_robot_ip.setText(robot_ip)
                     self._save_current_settings()
         else:
+            self._robot_detected = False
+            self._last_detected_robot_ip = ""
             self._style_badge(self.lbl_robot_badge, "No detectado", "error")
             self.lbl_robot_desc.setText(f"Robot no encontrado en la subred (MAC: {target_mac}). Pulsa 'Buscar / Escanear robot'.")
+
+        self._update_robot_action_buttons()
 
     def _refresh_robot_status_styles(self):
         if hasattr(self, "_last_robot_scan_data") and self._last_robot_scan_data:
             wifi_ok, ssid, robot_found, robot_ip, msg = self._last_robot_scan_data
             self._update_robot_ui_status(wifi_ok, ssid, robot_found, robot_ip, msg)
+
+    def _on_robot_ip_changed(self):
+        if not getattr(self, "_is_loading_preferences", False):
+            self._save_current_settings()
+        current_ip = self.ent_robot_ip.text().strip() if hasattr(self, "ent_robot_ip") else ""
+        last_detected = getattr(self, "_last_detected_robot_ip", "")
+        if current_ip and current_ip == last_detected:
+            self._robot_detected = True
+        else:
+            self._robot_detected = False
+        self._update_robot_action_buttons()
+
+    def _update_robot_action_buttons(self):
+        if not hasattr(self, "btn_robot_scp") or not hasattr(self, "btn_robot_compile") or not hasattr(self, "btn_robot_terminal"):
+            return
+        detected = getattr(self, "_robot_detected", False)
+        ip = self.ent_robot_ip.text().strip() if hasattr(self, "ent_robot_ip") else ""
+        enabled = bool(detected and ip)
+
+        self.btn_robot_scp.setEnabled(enabled)
+        self.btn_robot_compile.setEnabled(enabled)
+        self.btn_robot_terminal.setEnabled(enabled)
+
+        if not enabled:
+            tip = "Robot no detectado en la red Wi-Fi. Conéctate a la red del robot y pulsa 'Buscar / Escanear robot'."
+            self.btn_robot_scp.setToolTip(tip)
+            self.btn_robot_compile.setToolTip(tip)
+            self.btn_robot_terminal.setToolTip(tip)
+        else:
+            self.btn_robot_scp.setToolTip("Enviar código fuente local al TurtleBot 4 (SCP)")
+            self.btn_robot_compile.setToolTip("Compilar espacio de trabajo remotamente en el TurtleBot 4 (colcon build)")
+            self.btn_robot_terminal.setToolTip("Abrir terminal interactiva SSH en el TurtleBot 4")
 
     def _on_robot_send_code(self):
         robot_ip = self.ent_robot_ip.text().strip() if hasattr(self, "ent_robot_ip") else ""
@@ -3320,12 +3388,19 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                     target_base = r_home + target_base[1:]
 
                 local_p = Path(ws_path).resolve()
-                if (local_p / "src").is_dir():
+                if (local_p / "package.xml").is_file():
+                    # El usuario seleccionó directamente la carpeta de un paquete individual
+                    src_dir = local_p
+                    dest_dir = f"{target_base.rstrip('/')}/src/{local_p.name}"
+                elif (local_p / "src").is_dir():
+                    # El usuario seleccionó la raíz de un workspace estándar con subcarpeta 'src'
                     src_dir = local_p / "src"
                     dest_dir = f"{target_base.rstrip('/')}/src"
                 else:
+                    # El usuario seleccionó una carpeta de trabajo cuyos paquetes están directamente dentro
+                    # (como 'workspace/pkg_navegacion_p1'), o se monta en /ros2_ws/src
                     src_dir = local_p
-                    dest_dir = f"{target_base.rstrip('/')}/src/{local_p.name}"
+                    dest_dir = f"{target_base.rstrip('/')}/src"
 
                 self.sig_log_received.emit(f"[SCP] Directorio origen local: {src_dir}\n")
                 self.sig_log_received.emit(f"[SCP] Directorio destino remoto: {dest_dir}\n")
@@ -3438,27 +3513,119 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         user = self.ent_robot_user.text().strip() if hasattr(self, "ent_robot_user") else "ubuntu"
         user = user or "ubuntu"
+        password = self.ent_robot_password.text().strip() if hasattr(self, "ent_robot_password") else ""
         port = self.ent_robot_port.text().strip() if hasattr(self, "ent_robot_port") else "22"
         port_opt = f"-p {port}" if port and port != "22" else ""
+        remote_ws = self.ent_robot_ws.text().strip() if hasattr(self, "ent_robot_ws") else "~/turtlebot4_ws"
+        remote_ws = remote_ws or "~/turtlebot4_ws"
+
+        # Comando para cargar automáticamente el entorno ROS 2 y el workspace manteniendo la sesión interactiva
+        remote_init_cmd = (
+            "if [ -f /opt/ros/humble/setup.bash ]; then source /opt/ros/humble/setup.bash; "
+            "elif [ -f /opt/ros/jazzy/setup.bash ]; then source /opt/ros/jazzy/setup.bash; fi; "
+            "if [ -f ~/turtlebot4_ws/install/setup.bash ]; then "
+            "source ~/turtlebot4_ws/install/setup.bash; echo '[ROS 2] Entorno cargado: ~/turtlebot4_ws/install/setup.bash'; "
+            f"elif [ -f {remote_ws}/install/setup.bash ]; then "
+            f"source {remote_ws}/install/setup.bash; echo '[ROS 2] Entorno cargado: {remote_ws}/install/setup.bash'; "
+            "fi; exec bash"
+        )
+
+        def _cleanup_temp_file(fpath: str, delay: float = 15.0):
+            def _worker():
+                time.sleep(delay)
+                try:
+                    if os.path.exists(fpath):
+                        os.remove(fpath)
+                except Exception:
+                    pass
+            threading.Thread(target=_worker, daemon=True).start()
+
+        # Limpiar ficheros temporales anteriores de askpass si hubiera alguno huérfano
+        try:
+            for old_ask in Path(tempfile.gettempdir()).glob("tb4_askpass_*"):
+                try:
+                    if old_ask.is_file():
+                        old_ask.unlink(missing_ok=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         try:
             if sys.platform == "win32":
-                cmd = f'cmd.exe /c start "TurtleBot 4 SSH ({user}@{robot_ip})" ssh -o StrictHostKeyChecking=no {port_opt} {user}@{robot_ip}'
-                subprocess.Popen(cmd)
-                self._append_log(f"\n[Terminal Robot] Ventana SSH iniciada en nueva consola para {user}@{robot_ip}\n")
+                if password:
+                    askpass_path = os.path.join(
+                        tempfile.gettempdir(),
+                        f"tb4_askpass_{os.getpid()}_{int(time.time() * 1000)}.cmd"
+                    )
+                    pass_escaped = password.replace("%", "%%")
+                    with open(askpass_path, "w", encoding="utf-8") as f:
+                        f.write(f"@echo off\r\necho {pass_escaped}\r\n")
+                    _cleanup_temp_file(askpass_path, delay=15.0)
+
+                    cmd = (
+                        f'cmd.exe /c start "TurtleBot 4 SSH ({user}@{robot_ip})" '
+                        f'cmd.exe /c "set "SSH_ASKPASS={askpass_path}" && '
+                        f'set "SSH_ASKPASS_REQUIRE=force" && '
+                        f'ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{robot_ip} "{remote_init_cmd}" || pause"'
+                    )
+                else:
+                    cmd = (
+                        f'cmd.exe /c start "TurtleBot 4 SSH ({user}@{robot_ip})" '
+                        f'ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{robot_ip} "{remote_init_cmd}"'
+                    )
+                subprocess.Popen(cmd, shell=True)
+                auth_mode = "con autenticación automática" if password else "solicitando contraseña"
+                self._append_log(f"\n[Terminal Robot] Ventana SSH iniciada en nueva consola para {user}@{robot_ip} ({auth_mode})\n")
             elif sys.platform == "darwin":
-                script = f'tell application "Terminal" to do script "ssh -o StrictHostKeyChecking=no {port_opt} {user}@{robot_ip}"'
+                if password:
+                    askpass_path = os.path.join(
+                        tempfile.gettempdir(),
+                        f"tb4_askpass_{os.getpid()}_{int(time.time() * 1000)}.sh"
+                    )
+                    with open(askpass_path, "w", encoding="utf-8") as f:
+                        f.write(f"#!/bin/sh\necho '{password}'\n")
+                    os.chmod(askpass_path, 0o700)
+                    _cleanup_temp_file(askpass_path, delay=15.0)
+
+                    script = (
+                        f'tell application "Terminal" to do script '
+                        f'"export SSH_ASKPASS=\\"{askpass_path}\\" SSH_ASKPASS_REQUIRE=force; '
+                        f'ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{robot_ip} \\"{remote_init_cmd}\\""'
+                    )
+                else:
+                    script = f'tell application "Terminal" to do script "ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{robot_ip} \\"{remote_init_cmd}\\""'
                 subprocess.Popen(["osascript", "-e", script])
-                self._append_log(f"\n[Terminal Robot] Terminal SSH lanzada para {user}@{robot_ip} (macOS)\n")
+                auth_mode = "con autenticación automática" if password else "solicitando contraseña"
+                self._append_log(f"\n[Terminal Robot] Terminal SSH lanzada para {user}@{robot_ip} (macOS, {auth_mode})\n")
             else:
                 launched = False
+                if password and shutil.which("sshpass"):
+                    ssh_cmd = f"sshpass -p '{password}' ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{robot_ip} '{remote_init_cmd}'"
+                elif password:
+                    askpass_path = os.path.join(
+                        tempfile.gettempdir(),
+                        f"tb4_askpass_{os.getpid()}_{int(time.time() * 1000)}.sh"
+                    )
+                    with open(askpass_path, "w", encoding="utf-8") as f:
+                        f.write(f"#!/bin/sh\necho '{password}'\n")
+                    os.chmod(askpass_path, 0o700)
+                    _cleanup_temp_file(askpass_path, delay=15.0)
+                    ssh_cmd = (
+                        f"env SSH_ASKPASS='{askpass_path}' SSH_ASKPASS_REQUIRE=force "
+                        f"ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{robot_ip} '{remote_init_cmd}'"
+                    )
+                else:
+                    ssh_cmd = f"ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{robot_ip} '{remote_init_cmd}'"
+
                 for term in ["x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"]:
                     if shutil.which(term):
-                        subprocess.Popen([term, "-e", f"ssh -o StrictHostKeyChecking=no {port_opt} {user}@{robot_ip}"])
+                        subprocess.Popen([term, "-e", f"bash -c \"{ssh_cmd}\""])
                         launched = True
                         break
                 if launched:
-                    self._append_log(f"\n[Terminal Robot] Terminal SSH lanzada para {user}@{robot_ip} (Linux)\n")
+                    auth_mode = "con autenticación automática" if password else "solicitando contraseña"
+                    self._append_log(f"\n[Terminal Robot] Terminal SSH lanzada para {user}@{robot_ip} (Linux, {auth_mode})\n")
                 else:
                     self._show_warning_box("Terminal Robot", "No se encontró ningún emulador de terminal compatible en el sistema.")
         except Exception as e:
