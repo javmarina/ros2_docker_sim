@@ -19,7 +19,7 @@ import threading
 import socket
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Callable
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
