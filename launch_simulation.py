@@ -1142,6 +1142,63 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 font-size: 13px;
                 line-height: 1.5;
             }}
+            /* Scroll Areas */
+            QScrollArea {{
+                background-color: transparent;
+                border: none;
+            }}
+            QScrollArea > QWidget > QWidget {{
+                background-color: transparent;
+            }}
+            /* Scrollbars */
+            QScrollBar:vertical {{
+                border: none;
+                background-color: transparent;
+                width: 8px;
+                margin: 0px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {p['border_input_hover']};
+                min-height: 25px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {p['border_focus']};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                border: none;
+                background: none;
+                height: 0px;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                border: none;
+                background: none;
+            }}
+            QScrollBar:horizontal {{
+                border: none;
+                background-color: transparent;
+                height: 8px;
+                margin: 0px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background-color: {p['border_input_hover']};
+                min-width: 25px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:horizontal:hover {{
+                background-color: {p['border_focus']};
+            }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+                border: none;
+                background: none;
+                width: 0px;
+            }}
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+                border: none;
+                background: none;
+            }}
         """
         self.setStyleSheet(css)
 
@@ -1327,8 +1384,18 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.tab_widget.addTab(self.tab_quick, QtGui.QIcon(), "Comandos rápidos")
 
         # 4. TurtleBot 4
-        self.tab_physical = QtWidgets.QWidget()
-        self._build_physical_tab(self.tab_physical)
+        self.tab_physical = QtWidgets.QScrollArea()
+        self.tab_physical.setObjectName("scrollPhysical")
+        self.tab_physical.setWidgetResizable(True)
+        self.tab_physical.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self.tab_physical.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.tab_physical.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.tab_physical.viewport().setAutoFillBackground(False)
+
+        self.tab_physical_content = QtWidgets.QWidget()
+        self.tab_physical_content.setObjectName("tabPhysicalContent")
+        self._build_physical_tab(self.tab_physical_content)
+        self.tab_physical.setWidget(self.tab_physical_content)
         self.tab_widget.addTab(self.tab_physical, QtGui.QIcon(), "TurtleBot 4")
 
         # 5. Ajustes Avanzados
@@ -1732,7 +1799,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         ops_layout.setContentsMargins(16, 14, 16, 14)
         ops_layout.setSpacing(12)
 
-        lbl_ops_head = QtWidgets.QLabel("Operaciones en el Robot Real")
+        lbl_ops_head = QtWidgets.QLabel("Operaciones en el robot")
         lbl_ops_head.setProperty("heading", True)
         ops_layout.addWidget(lbl_ops_head)
 
