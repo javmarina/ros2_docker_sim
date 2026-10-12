@@ -38,6 +38,35 @@ class DockerState(Enum):
         return self == DockerState.NOT_RUNNING
 
 
+class ContainerState(Enum):
+    """Estados del ciclo de vida del contenedor de simulación."""
+    NOT_RUNNING = "NOT_RUNNING"
+    STARTING = "STARTING"
+    RUNNING = "RUNNING"
+    STOPPING = "STOPPING"
+
+    @property
+    def is_running(self) -> bool:
+        return self == ContainerState.RUNNING
+
+    @property
+    def is_starting(self) -> bool:
+        return self == ContainerState.STARTING
+
+    @property
+    def is_stopping(self) -> bool:
+        return self == ContainerState.STOPPING
+
+    @property
+    def is_not_running(self) -> bool:
+        return self == ContainerState.NOT_RUNNING
+
+    @property
+    def is_busy(self) -> bool:
+        """Indica si el contenedor está en un estado de transición (iniciando o deteniéndose)."""
+        return self in (ContainerState.STARTING, ContainerState.STOPPING)
+
+
 DEFAULT_CONTAINER_NAME = "ros2_jazzy_nav_sim"
 DOCKERFILE_HASH_LABEL = "org.nav_course.dockerfile_hash"
 COURSE_IMAGE_NAME = "ros2-jazzy-nav-course:latest"
@@ -315,6 +344,11 @@ class DockerService:
             return bool(res.stdout.strip())
         except Exception:
             return False
+
+    @classmethod
+    def get_container_state(cls, container_name: str = DEFAULT_CONTAINER_NAME, timeout: float = 3.0) -> ContainerState:
+        """Determina el estado actual del contenedor como ContainerState enum."""
+        return ContainerState.RUNNING if cls.is_container_running(container_name, timeout=timeout) else ContainerState.NOT_RUNNING
 
     @staticmethod
     def is_image_available(image_name: str = COURSE_IMAGE_NAME, timeout: float = 5.0) -> bool:

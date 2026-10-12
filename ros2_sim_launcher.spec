@@ -14,6 +14,7 @@ datas = [
     (str(assets_dir), 'assets'),
     (str(spec_dir / 'version.json'), '.'),
     (str(spec_dir / 'Dockerfile'), '.'),
+    (str(spec_dir / 'turtlebot4_nodock.launch.py'), '.'),
 ]
 
 hiddenimports = [
@@ -26,6 +27,11 @@ hiddenimports = [
     'embedded_icon',
     'robot_registry',
     'updater',
+    'theme',
+    'utils',
+    'exception_dialog',
+    'physical_tab',
+    'main_window',
 ]
 
 a = Analysis(

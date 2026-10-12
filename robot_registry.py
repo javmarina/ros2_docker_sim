@@ -4,8 +4,28 @@ Facilita la incorporación de nuevos robots o prácticas en la asignatura
 sin necesidad de modificar la interfaz gráfica ni los servicios Docker.
 """
 
+import base64
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Callable
+
+# Lectura y codificación de turtlebot4_nodock.launch.py para inyección dinámica en runtime
+_NODOCK_LAUNCH_FILE = Path(__file__).parent / "turtlebot4_nodock.launch.py"
+if _NODOCK_LAUNCH_FILE.is_file():
+    _NODOCK_LAUNCH_B64 = base64.b64encode(_NODOCK_LAUNCH_FILE.read_bytes()).decode("ascii")
+else:
+    _NODOCK_LAUNCH_B64 = ""
+
+
+def _build_ensure_nodock_launch_cmd() -> str:
+    """Comando para asegurar que turtlebot4_nodock.launch.py exista dentro del contenedor."""
+    if not _NODOCK_LAUNCH_B64:
+        return ""
+    dest = "/opt/ros/jazzy/share/turtlebot4_gz_bringup/launch/turtlebot4_nodock.launch.py"
+    return (
+        f"python3 -c \"import os, base64; p='{dest}'; "
+        f"os.path.exists(p) or open(p, 'wb').write(base64.b64decode('{_NODOCK_LAUNCH_B64}'))\""
+    )
 
 
 @dataclass
@@ -82,15 +102,22 @@ def _build_turtlebot4_command(scenario_id: str, world_name: str, extra_args: str
     env = _build_env_prefix(force_rebuild)
     args = extra_args.strip()
 
-    map_arg = f"map:=/opt/ros/jazzy/share/turtlebot4_navigation/maps/{world_name}.yaml" if world_name in ["warehouse", "depot", "maze"] else ""
+    actual_world = "empty" if "empty" in world_name.lower() else world_name.strip()
+
+    map_arg = f"map:=/opt/ros/jazzy/share/turtlebot4_navigation/maps/{actual_world}.yaml" if actual_world in ["warehouse", "depot", "maze"] else ""
+
+    # Usar turtlebot4_nodock.launch.py para eliminar el dock en todos los mundos
+    ensure_cmd = _build_ensure_nodock_launch_cmd()
+    launch_file = "turtlebot4_nodock.launch.py"
+    prefix = f"{env} && {ensure_cmd}" if ensure_cmd else env
 
     if scenario_id == "nav2":
         loc_part = f"localization:=true {map_arg}".strip()
-        return f"{env} && ros2 launch turtlebot4_gz_bringup turtlebot4_gz.launch.py world:={world_name} nav2:=true {loc_part} rviz:=true {args}".strip()
+        return f"{prefix} && ros2 launch turtlebot4_gz_bringup {launch_file} world:={actual_world} nav2:=true {loc_part} rviz:=true {args}".strip()
     elif scenario_id == "slam":
-        return f"{env} && ros2 launch turtlebot4_gz_bringup turtlebot4_gz.launch.py world:={world_name} slam:=true nav2:=true rviz:=true {args}".strip()
+        return f"{prefix} && ros2 launch turtlebot4_gz_bringup {launch_file} world:={actual_world} slam:=true nav2:=true rviz:=true {args}".strip()
     elif scenario_id == "sim_only":
-        return f"{env} && ros2 launch turtlebot4_gz_bringup turtlebot4_gz.launch.py world:={world_name} {args}".strip()
+        return f"{prefix} && ros2 launch turtlebot4_gz_bringup {launch_file} world:={actual_world} {args}".strip()
     elif scenario_id == "rviz2":
         return f"{env} && ros2 launch turtlebot4_viz view_robot.launch.py"
     elif scenario_id == "teleop":
