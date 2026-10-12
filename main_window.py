@@ -76,11 +76,18 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     sig_log_received = QtCore.Signal(str)
     sig_robot_scan_finished = QtCore.Signal(bool, str, bool, str, str)
 
-    def __init__(self):
+    def __init__(self, enable_background_tasks: Optional[bool] = None):
         super().__init__()
         self.setWindowTitle(f"ROS 2 Jazzy - Launcher de simulación (v{CURRENT_VERSION}) | Sistemas de Navegación")
         self.resize(1020, 680)
         self.setMinimumSize(880, 520)
+
+        # Determinar si se habilitan las tareas de sondeo en segundo plano (desactivadas en pruebas)
+        if enable_background_tasks is None:
+            self._enable_background_tasks = not bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        else:
+            self._enable_background_tasks = enable_background_tasks
+        self._is_closing = False
 
         self.config_store = ConfigStore(fallback_dir=Path(__file__).parent.resolve())
         self.active_sim_thread: Optional[ProcessRunnerThread] = None
@@ -121,17 +128,19 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self._apply_theme(self._is_dark)
         self._load_saved_preferences()
         self._update_action_buttons_state()
-        self._start_container_poll_timer()
-        self._check_docker_live_status()
+
+        if self._enable_background_tasks:
+            self._start_container_poll_timer()
+            self._check_docker_live_status()
+
+            if "--force-update" in sys.argv:
+                QtCore.QTimer.singleShot(1000, lambda: self._on_manual_check_updates(force=True))
+            else:
+                QtCore.QTimer.singleShot(1500, self._check_for_updates_background)
 
         hints = QtWidgets.QApplication.styleHints()
         if hasattr(hints, "colorSchemeChanged"):
             hints.colorSchemeChanged.connect(self._on_color_scheme_changed)
-
-        if "--force-update" in sys.argv:
-            QtCore.QTimer.singleShot(1000, lambda: self._on_manual_check_updates(force=True))
-        else:
-            QtCore.QTimer.singleShot(1500, self._check_for_updates_background)
 
     @property
     def docker_state(self) -> DockerState:
@@ -1071,8 +1080,8 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self._container_poll_timer.start()
 
     def _check_container_live_status(self):
-        if self._docker_state != DockerState.RUNNING:
-            if self._container_state != ContainerState.NOT_RUNNING:
+        if self._docker_state != DockerState.RUNNING or self._is_closing:
+            if self._container_state != ContainerState.NOT_RUNNING and not self._is_closing:
                 self.sig_container_status.emit(ContainerState.NOT_RUNNING)
             return
 
@@ -1086,7 +1095,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         def _worker():
             try:
+                if self._is_closing:
+                    return
                 running = DockerService.is_container_running(DEFAULT_CONTAINER_NAME, timeout=3.5)
+                if self._is_closing:
+                    return
 
                 # Avoid transient false negatives while active_sim_thread is still running
                 if not running and self.active_sim_thread and self.active_sim_thread.isRunning():
@@ -1097,7 +1110,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                     self._container_miss_count = 0
 
                 # Ensure we haven't entered a transition state while worker was running
-                if self._container_state not in (ContainerState.STARTING, ContainerState.STOPPING):
+                if not self._is_closing and self._container_state not in (ContainerState.STARTING, ContainerState.STOPPING):
                     new_state = ContainerState.RUNNING if running else ContainerState.NOT_RUNNING
                     self.sig_container_status.emit(new_state)
             except Exception:
@@ -1175,18 +1188,27 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 self.btn_launch.setToolTip("Inicia la simulación ROS 2 seleccionada")
 
     def _check_docker_live_status(self):
-        if self._docker_state == DockerState.STARTING:
+        if self._docker_state == DockerState.STARTING or self._is_closing:
             return
 
         self._style_badge(self.lbl_docker_badge, "● Comprobando Docker...", "warning")
 
         def _worker():
-            installed, _ = DockerService.check_docker_installed()
-            if not installed:
-                self.sig_docker_status.emit(False, False, "")
-                return
-            running, daemon_msg = DockerService.check_docker_running()
-            self.sig_docker_status.emit(True, running, daemon_msg)
+            try:
+                if self._is_closing:
+                    return
+                installed, _ = DockerService.check_docker_installed()
+                if self._is_closing:
+                    return
+                if not installed:
+                    self.sig_docker_status.emit(False, False, "")
+                    return
+                running, daemon_msg = DockerService.check_docker_running()
+                if self._is_closing:
+                    return
+                self.sig_docker_status.emit(True, running, daemon_msg)
+            except Exception as e:
+                logger.debug("Error en _worker de verificación de Docker: %s", e)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -1327,17 +1349,27 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self._on_manual_check_updates()
 
     def _check_for_updates_background(self, force: bool = False):
+        if self._is_closing:
+            return
+
         def _worker():
-            has_update, info, _ = check_for_updates(timeout=3.0, force=force)
-            if has_update and info:
-                ver = info.get("version", "")
-                self.latest_update_info = info
-                QtCore.QMetaObject.invokeMethod(
-                    self, "_on_update_found_bg", QtCore.Qt.ConnectionType.QueuedConnection,
-                    QtCore.Q_ARG(str, ver)
-                )
-            else:
-                self.latest_update_info = None
+            try:
+                if self._is_closing:
+                    return
+                has_update, info, _ = check_for_updates(timeout=3.0, force=force)
+                if self._is_closing:
+                    return
+                if has_update and info:
+                    ver = info.get("version", "")
+                    self.latest_update_info = info
+                    QtCore.QMetaObject.invokeMethod(
+                        self, "_on_update_found_bg", QtCore.Qt.ConnectionType.QueuedConnection,
+                        QtCore.Q_ARG(str, ver)
+                    )
+                else:
+                    self.latest_update_info = None
+            except Exception as e:
+                logger.debug("Error en worker de comprobación de actualizaciones: %s", e)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -1941,42 +1973,53 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             return
 
         def _check_worker():
-            installed, _ = DockerService.check_docker_installed()
-            running, _ = DockerService.check_docker_running()
-            if not installed or not running:
-                QtCore.QMetaObject.invokeMethod(
-                    self, "_apply_docker_image_ui_state", QtCore.Qt.ConnectionType.QueuedConnection,
-                    QtCore.Q_ARG(str, "docker_down"),
-                    QtCore.Q_ARG(str, "Docker no disponible")
-                )
-                return
+            try:
+                if self._is_closing:
+                    return
+                installed, _ = DockerService.check_docker_installed()
+                running, _ = DockerService.check_docker_running()
+                if self._is_closing:
+                    return
+                if not installed or not running:
+                    QtCore.QMetaObject.invokeMethod(
+                        self, "_apply_docker_image_ui_state", QtCore.Qt.ConnectionType.QueuedConnection,
+                        QtCore.Q_ARG(str, "docker_down"),
+                        QtCore.Q_ARG(str, "Docker no disponible")
+                    )
+                    return
 
-            if not DockerService.is_image_available(COURSE_IMAGE_NAME):
-                QtCore.QMetaObject.invokeMethod(
-                    self, "_apply_docker_image_ui_state", QtCore.Qt.ConnectionType.QueuedConnection,
-                    QtCore.Q_ARG(str, "not_installed"),
-                    QtCore.Q_ARG(str, "Imagen no encontrada localmente")
-                )
-                return
+                if not DockerService.is_image_available(COURSE_IMAGE_NAME):
+                    if self._is_closing:
+                        return
+                    QtCore.QMetaObject.invokeMethod(
+                        self, "_apply_docker_image_ui_state", QtCore.Qt.ConnectionType.QueuedConnection,
+                        QtCore.Q_ARG(str, "not_installed"),
+                        QtCore.Q_ARG(str, "Imagen no encontrada localmente")
+                    )
+                    return
 
-            expected_hash = DockerService.compute_dockerfile_hash(DOCKERFILE_CONTENT)
-            up_to_date = DockerService.is_image_up_to_date(
-                COURSE_IMAGE_NAME,
-                expected_hash,
-                fallback_hash=self.config_store.get("dockerfile_content_hash")
-            )
-            if up_to_date:
-                QtCore.QMetaObject.invokeMethod(
-                    self, "_apply_docker_image_ui_state", QtCore.Qt.ConnectionType.QueuedConnection,
-                    QtCore.Q_ARG(str, "up_to_date"),
-                    QtCore.Q_ARG(str, "Imagen al día (capas sincronizadas)")
+                expected_hash = DockerService.compute_dockerfile_hash(DOCKERFILE_CONTENT)
+                up_to_date = DockerService.is_image_up_to_date(
+                    COURSE_IMAGE_NAME,
+                    expected_hash,
+                    fallback_hash=self.config_store.get("dockerfile_content_hash")
                 )
-            else:
-                QtCore.QMetaObject.invokeMethod(
-                    self, "_apply_docker_image_ui_state", QtCore.Qt.ConnectionType.QueuedConnection,
-                    QtCore.Q_ARG(str, "update_available"),
-                    QtCore.Q_ARG(str, "Actualización disponible (capas modificadas)")
-                )
+                if self._is_closing:
+                    return
+                if up_to_date:
+                    QtCore.QMetaObject.invokeMethod(
+                        self, "_apply_docker_image_ui_state", QtCore.Qt.ConnectionType.QueuedConnection,
+                        QtCore.Q_ARG(str, "up_to_date"),
+                        QtCore.Q_ARG(str, "Imagen al día (capas sincronizadas)")
+                    )
+                else:
+                    QtCore.QMetaObject.invokeMethod(
+                        self, "_apply_docker_image_ui_state", QtCore.Qt.ConnectionType.QueuedConnection,
+                        QtCore.Q_ARG(str, "update_available"),
+                        QtCore.Q_ARG(str, "Actualización disponible (capas modificadas)")
+                    )
+            except Exception as e:
+                logger.debug("Error en worker de verificación de imagen: %s", e)
 
         threading.Thread(target=_check_worker, daemon=True).start()
 
@@ -2055,6 +2098,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     # -----------------------------------------------------------------------
 
     def closeEvent(self, event: QtGui.QCloseEvent):
+        self._is_closing = True
         self._set_docker_state(DockerState.NOT_RUNNING)
         self._save_current_settings()
 
@@ -2066,6 +2110,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         if self.active_cmd_thread and self.active_cmd_thread.isRunning():
             self.active_cmd_thread.terminate_process()
             self.active_cmd_thread.wait(500)
+
+        # En modo de pruebas o sin tareas en segundo plano, cerrar inmediatamente
+        if not self._enable_background_tasks:
+            event.accept()
+            return
 
         if DockerService.is_container_running(DEFAULT_CONTAINER_NAME):
             answer = QtWidgets.QMessageBox.question(

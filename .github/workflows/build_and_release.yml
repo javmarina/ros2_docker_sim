@@ -32,10 +32,11 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Test Suite
+        shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          python -m pytest test_launcher.py -v
+          python -m pytest test_launcher.py -v --tb=short
 
   build:
     name: Build ros2_sim_launcher.exe

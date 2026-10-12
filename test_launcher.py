@@ -107,7 +107,7 @@ def test_physical_tab_widget():
 
 def test_main_window_integration():
     """Validates full ModernSimulationLauncher instantiation, tab pages, and aliases."""
-    win = ModernSimulationLauncher()
+    win = ModernSimulationLauncher(enable_background_tasks=False)
     try:
         assert win.tab_widget.count() == 6
         assert win.cbo_robot.count() == len(get_all_robots())
@@ -129,6 +129,7 @@ def test_main_window_integration():
             assert win.cbo_scenario.count() == len(base_bot.scenarios)
     finally:
         win.close()
+        QtWidgets.QApplication.processEvents()
 
 
 def test_robot_registry():
@@ -208,7 +209,7 @@ def test_dialog_stylesheets_and_variants():
     assert "C:/Users/test/chevron_down.svg" in win_qss
 
     # Test button variant styling and rendered colors in main window
-    win = ModernSimulationLauncher()
+    win = ModernSimulationLauncher(enable_background_tasks=False)
     try:
         # Verify action buttons retain their distinctive brand colors
         pm = QtGui.QPixmap(win.btn_launch.size())
@@ -244,6 +245,7 @@ def test_dialog_stylesheets_and_variants():
         assert win._is_dark == initial_dark
     finally:
         win.close()
+        QtWidgets.QApplication.processEvents()
 
 
 def test_container_state_and_button_robustness():
@@ -257,7 +259,7 @@ def test_container_state_and_button_robustness():
     assert ContainerState.STOPPING.is_stopping
     assert ContainerState.STOPPING.is_busy
 
-    win = ModernSimulationLauncher()
+    win = ModernSimulationLauncher(enable_background_tasks=False)
     try:
         # Initial state: NOT_RUNNING -> launch enabled, stop disabled
         win.sig_container_status.emit(ContainerState.NOT_RUNNING)
@@ -303,6 +305,7 @@ def test_container_state_and_button_robustness():
         assert not win.btn_stop.isEnabled()
     finally:
         win.close()
+        QtWidgets.QApplication.processEvents()
 
 
 if __name__ == "__main__":
