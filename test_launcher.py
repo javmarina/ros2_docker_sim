@@ -8,6 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
 from PySide6 import QtCore, QtGui, QtWidgets
 
 # Ensure an application instance exists for Qt widgets
@@ -23,6 +24,11 @@ from physical_tab import PhysicalRobotTab
 from docker_service import ContainerState
 from main_window import ModernSimulationLauncher
 from robot_registry import get_all_robots, get_robot_by_id
+
+
+@pytest.fixture(autouse=True)
+def disable_background_update_checks(monkeypatch):
+    monkeypatch.setattr("main_window.check_for_updates", lambda **kwargs: (False, None, ""))
 
 
 def test_theme_palettes_and_stylesheet():
@@ -328,5 +334,4 @@ if __name__ == "__main__":
     test_container_state_and_button_robustness()
     print("[OK] test_container_state_and_button_robustness passed")
     print("\nAll 10 test suites passed successfully!")
-
 
