@@ -1,0 +1,7 @@
+image: classroom.png
+resolution: 0.0500
+origin: [-1.5000, -1.5000, 0.0000]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.25
+mode: trinary

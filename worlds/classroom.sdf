@@ -1,0 +1,1229 @@
+<?xml version='1.0' encoding='ASCII'?>
+<sdf version='1.7'>
+  <world name='classroom'>
+    <physics type='ode'>
+      <max_step_size>0.003</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin name='gz::sim::systems::Physics' filename='gz-sim-physics-system' />
+    <plugin name='gz::sim::systems::UserCommands' filename='gz-sim-user-commands-system' />
+    <plugin name='gz::sim::systems::SceneBroadcaster' filename='gz-sim-scene-broadcaster-system' />
+    <plugin name='gz::sim::systems::Contact' filename='gz-sim-contact-system' />
+
+    <scene>
+      <ambient>0.92 0.92 0.92 1</ambient>
+      <background>0.75 0.82 0.90 1</background>
+      <shadows>0</shadows>
+      <grid>false</grid>
+    </scene>
+
+    <light type='directional' name='sun'>
+      <cast_shadows>0</cast_shadows>
+      <pose>6.7 4.1 12 0 0 0</pose>
+      <diffuse>0.85 0.85 0.85 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.3 0.2 -0.9</direction>
+    </light>
+
+    <!-- Suelo general -->
+    <model name='ground_plane'>
+      <static>true</static>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <plane><normal>0 0 1</normal><size>100 100</size></plane>
+          </geometry>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <plane><normal>0 0 1</normal><size>100 100</size></plane>
+          </geometry>
+          <material>
+            <ambient>0.85 0.85 0.83 1</ambient>
+            <diffuse>0.87 0.87 0.85 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+      <pose>0 0 0 0 0 0</pose>
+    </model>
+
+    <!-- Pavimento interior del aula -->
+    <model name='classroom_floor'>
+      <static>true</static>
+      <pose>6.7310 4.1275 0.001 0 0 0</pose>
+      <link name='link'>
+        <visual name='visual'>
+          <geometry>
+            <box><size>13.4620 8.2550 0.002</size></box>
+          </geometry>
+          <material>
+            <ambient>0.88 0.88 0.86 1</ambient>
+            <diffuse>0.90 0.90 0.88 1</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Estructura de paredes del aula -->
+    <model name='classroom_walls'>
+      <static>true</static>
+      <link name='walls_link'>
+        <!-- Pared Sur (Inferior) -->
+        <collision name='wall_south_col'>
+          <pose>6.7310 -0.0750 1.2500 0 0 0</pose>
+          <geometry><box><size>13.7620 0.1500 2.5000</size></box></geometry>
+        </collision>
+        <visual name='wall_south_vis'>
+          <pose>6.7310 -0.0750 1.2500 0 0 0</pose>
+          <geometry><box><size>13.7620 0.1500 2.5000</size></box></geometry>
+          <material><ambient>0.90 0.90 0.88 1</ambient><diffuse>0.92 0.92 0.90 1</diffuse></material>
+        </visual>
+        <!-- Pared Norte (Superior) -->
+        <collision name='wall_north_col'>
+          <pose>6.7310 8.3300 1.2500 0 0 0</pose>
+          <geometry><box><size>13.7620 0.1500 2.5000</size></box></geometry>
+        </collision>
+        <visual name='wall_north_vis'>
+          <pose>6.7310 8.3300 1.2500 0 0 0</pose>
+          <geometry><box><size>13.7620 0.1500 2.5000</size></box></geometry>
+          <material><ambient>0.90 0.90 0.88 1</ambient><diffuse>0.92 0.92 0.90 1</diffuse></material>
+        </visual>
+        <!-- Pared Oeste (Tramo inferior a Puerta Sur) -->
+        <collision name='wall_west_bottom_col'>
+          <pose>-0.0750 0.2540 1.2500 0 0 0</pose>
+          <geometry><box><size>0.1500 0.5080 2.5000</size></box></geometry>
+        </collision>
+        <visual name='wall_west_bottom_vis'>
+          <pose>-0.0750 0.2540 1.2500 0 0 0</pose>
+          <geometry><box><size>0.1500 0.5080 2.5000</size></box></geometry>
+          <material><ambient>0.90 0.90 0.88 1</ambient><diffuse>0.92 0.92 0.90 1</diffuse></material>
+        </visual>
+        <!-- Pared Oeste (Tramo superior a Puerta Sur) -->
+        <collision name='wall_west_top_col'>
+          <pose>-0.0750 5.3594 1.2500 0 0 0</pose>
+          <geometry><box><size>0.1500 5.7912 2.5000</size></box></geometry>
+        </collision>
+        <visual name='wall_west_top_vis'>
+          <pose>-0.0750 5.3594 1.2500 0 0 0</pose>
+          <geometry><box><size>0.1500 5.7912 2.5000</size></box></geometry>
+          <material><ambient>0.90 0.90 0.88 1</ambient><diffuse>0.92 0.92 0.90 1</diffuse></material>
+        </visual>
+        <!-- Dintel Puerta Sur -->
+        <visual name='lintel_west_vis'>
+          <pose>-0.0750 1.4859 2.30 0 0 0</pose>
+          <geometry><box><size>0.1500 1.9558 0.40</size></box></geometry>
+          <material><ambient>0.90 0.90 0.88 1</ambient><diffuse>0.92 0.92 0.90 1</diffuse></material>
+        </visual>
+        <!-- Pared Este (Tramo inferior a Puerta Norte) -->
+        <collision name='wall_east_bottom_col'>
+          <pose>13.5370 0.2540 1.2500 0 0 0</pose>
+          <geometry><box><size>0.1500 0.5080 2.5000</size></box></geometry>
+        </collision>
+        <visual name='wall_east_bottom_vis'>
+          <pose>13.5370 0.2540 1.2500 0 0 0</pose>
+          <geometry><box><size>0.1500 0.5080 2.5000</size></box></geometry>
+          <material><ambient>0.90 0.90 0.88 1</ambient><diffuse>0.92 0.92 0.90 1</diffuse></material>
+        </visual>
+        <!-- Pared Este (Tramo superior a Puerta Norte) -->
+        <collision name='wall_east_top_col'>
+          <pose>13.5370 5.3594 1.2500 0 0 0</pose>
+          <geometry><box><size>0.1500 5.7912 2.5000</size></box></geometry>
+        </collision>
+        <visual name='wall_east_top_vis'>
+          <pose>13.5370 5.3594 1.2500 0 0 0</pose>
+          <geometry><box><size>0.1500 5.7912 2.5000</size></box></geometry>
+          <material><ambient>0.90 0.90 0.88 1</ambient><diffuse>0.92 0.92 0.90 1</diffuse></material>
+        </visual>
+        <!-- Dintel Puerta Norte -->
+        <visual name='lintel_east_vis'>
+          <pose>13.5370 1.4859 2.30 0 0 0</pose>
+          <geometry><box><size>0.1500 1.9558 0.40</size></box></geometry>
+          <material><ambient>0.90 0.90 0.88 1</ambient><diffuse>0.92 0.92 0.90 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Armario / Archivador pared izquierda -->
+    <model name='armario'>
+      <static>true</static>
+      <pose>0.2349 5.6769 1.0000 0 0 0</pose>
+      <link name='link'>
+        <collision name='col'>
+          <geometry><box><size>0.4699 5.1562 2.0000</size></box></geometry>
+        </collision>
+        <visual name='vis'>
+          <geometry><box><size>0.4699 5.1562 2.0000</size></box></geometry>
+          <material><ambient>0.35 0.35 0.38 1</ambient><diffuse>0.42 0.42 0.45 1</diffuse><specular>0.2 0.2 0.2 1</specular></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Mesa 1 (Alumnos) -->
+    <model name='mesa_1'>
+      <static>true</static>
+      <link name='mesa_1_link'>
+        <collision name='mesa_1_col'>
+          <pose>2.3654 5.8515 0.3750 0 0 0</pose>
+          <geometry><box><size>1.5049 4.8069 0.7500</size></box></geometry>
+        </collision>
+        <visual name='mesa_1_top_vis'>
+          <pose>2.3654 5.8515 0.7300 0 0 0</pose>
+          <geometry><box><size>1.5049 4.8069 0.0400</size></box></geometry>
+          <material>
+            <ambient>0.82 0.72 0.56 1</ambient>
+            <diffuse>0.86 0.75 0.60 1</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+        <visual name='mesa_1_frame_vis'>
+          <pose>2.3654 5.8515 0.3550 0 0 0</pose>
+          <geometry><box><size>1.4297 4.7108 0.7100</size></box></geometry>
+          <material>
+            <ambient>0.18 0.18 0.20 1</ambient>
+            <diffuse>0.22 0.22 0.24 1</diffuse>
+            <specular>0.3 0.3 0.3 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Sillas para Mesa 1 (Alumnos) -->
+    <model name='sillas_mesa_1'>
+      <static>true</static>
+      <link name='sillas_mesa_1_link'>
+        <collision name='chair_izq_1_col'>
+          <pose>1.5113 3.7485 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_1_seat_vis'>
+          <pose>1.5113 3.7485 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_1_back_vis'>
+          <pose>1.4341 3.7485 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_1_leg_vis'>
+          <pose>1.5113 3.7485 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_2_col'>
+          <pose>1.5113 4.3494 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_2_seat_vis'>
+          <pose>1.5113 4.3494 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_2_back_vis'>
+          <pose>1.4341 4.3494 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_2_leg_vis'>
+          <pose>1.5113 4.3494 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_3_col'>
+          <pose>1.5113 4.9502 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_3_seat_vis'>
+          <pose>1.5113 4.9502 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_3_back_vis'>
+          <pose>1.4341 4.9502 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_3_leg_vis'>
+          <pose>1.5113 4.9502 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_4_col'>
+          <pose>1.5113 5.5511 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_4_seat_vis'>
+          <pose>1.5113 5.5511 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_4_back_vis'>
+          <pose>1.4341 5.5511 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_4_leg_vis'>
+          <pose>1.5113 5.5511 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_5_col'>
+          <pose>1.5113 6.1520 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_5_seat_vis'>
+          <pose>1.5113 6.1520 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_5_back_vis'>
+          <pose>1.4341 6.1520 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_5_leg_vis'>
+          <pose>1.5113 6.1520 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_6_col'>
+          <pose>1.5113 6.7528 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_6_seat_vis'>
+          <pose>1.5113 6.7528 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_6_back_vis'>
+          <pose>1.4341 6.7528 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_6_leg_vis'>
+          <pose>1.5113 6.7528 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_7_col'>
+          <pose>1.5113 7.3537 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_7_seat_vis'>
+          <pose>1.5113 7.3537 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_7_back_vis'>
+          <pose>1.4341 7.3537 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_7_leg_vis'>
+          <pose>1.5113 7.3537 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_8_col'>
+          <pose>1.5113 7.9546 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_8_seat_vis'>
+          <pose>1.5113 7.9546 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_8_back_vis'>
+          <pose>1.4341 7.9546 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_8_leg_vis'>
+          <pose>1.5113 7.9546 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_1_col'>
+          <pose>3.2194 3.7485 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_1_seat_vis'>
+          <pose>3.2194 3.7485 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_1_back_vis'>
+          <pose>3.2967 3.7485 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_1_leg_vis'>
+          <pose>3.2194 3.7485 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_2_col'>
+          <pose>3.2194 4.3494 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_2_seat_vis'>
+          <pose>3.2194 4.3494 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_2_back_vis'>
+          <pose>3.2967 4.3494 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_2_leg_vis'>
+          <pose>3.2194 4.3494 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_3_col'>
+          <pose>3.2194 4.9502 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_3_seat_vis'>
+          <pose>3.2194 4.9502 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_3_back_vis'>
+          <pose>3.2967 4.9502 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_3_leg_vis'>
+          <pose>3.2194 4.9502 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_4_col'>
+          <pose>3.2194 5.5511 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_4_seat_vis'>
+          <pose>3.2194 5.5511 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_4_back_vis'>
+          <pose>3.2967 5.5511 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_4_leg_vis'>
+          <pose>3.2194 5.5511 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_5_col'>
+          <pose>3.2194 6.1520 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_5_seat_vis'>
+          <pose>3.2194 6.1520 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_5_back_vis'>
+          <pose>3.2967 6.1520 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_5_leg_vis'>
+          <pose>3.2194 6.1520 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_6_col'>
+          <pose>3.2194 6.7528 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_6_seat_vis'>
+          <pose>3.2194 6.7528 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_6_back_vis'>
+          <pose>3.2967 6.7528 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_6_leg_vis'>
+          <pose>3.2194 6.7528 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_7_col'>
+          <pose>3.2194 7.3537 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_7_seat_vis'>
+          <pose>3.2194 7.3537 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_7_back_vis'>
+          <pose>3.2967 7.3537 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_7_leg_vis'>
+          <pose>3.2194 7.3537 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_8_col'>
+          <pose>3.2194 7.9546 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_8_seat_vis'>
+          <pose>3.2194 7.9546 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_8_back_vis'>
+          <pose>3.2967 7.9546 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_8_leg_vis'>
+          <pose>3.2194 7.9546 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Mesa 2 (Alumnos) -->
+    <model name='mesa_2'>
+      <static>true</static>
+      <link name='mesa_2_link'>
+        <collision name='mesa_2_col'>
+          <pose>6.3087 2.6615 0.3750 0 0 0</pose>
+          <geometry><box><size>1.5050 4.8069 0.7500</size></box></geometry>
+        </collision>
+        <visual name='mesa_2_top_vis'>
+          <pose>6.3087 2.6615 0.7300 0 0 0</pose>
+          <geometry><box><size>1.5050 4.8069 0.0400</size></box></geometry>
+          <material>
+            <ambient>0.82 0.72 0.56 1</ambient>
+            <diffuse>0.86 0.75 0.60 1</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+        <visual name='mesa_2_frame_vis'>
+          <pose>6.3087 2.6615 0.3550 0 0 0</pose>
+          <geometry><box><size>1.4297 4.7108 0.7100</size></box></geometry>
+          <material>
+            <ambient>0.18 0.18 0.20 1</ambient>
+            <diffuse>0.22 0.22 0.24 1</diffuse>
+            <specular>0.3 0.3 0.3 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Sillas para Mesa 2 (Alumnos) -->
+    <model name='sillas_mesa_2'>
+      <static>true</static>
+      <link name='sillas_mesa_2_link'>
+        <collision name='chair_izq_1_col'>
+          <pose>5.4546 0.5584 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_1_seat_vis'>
+          <pose>5.4546 0.5584 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_1_back_vis'>
+          <pose>5.3774 0.5584 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_1_leg_vis'>
+          <pose>5.4546 0.5584 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_2_col'>
+          <pose>5.4546 1.1593 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_2_seat_vis'>
+          <pose>5.4546 1.1593 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_2_back_vis'>
+          <pose>5.3774 1.1593 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_2_leg_vis'>
+          <pose>5.4546 1.1593 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_3_col'>
+          <pose>5.4546 1.7602 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_3_seat_vis'>
+          <pose>5.4546 1.7602 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_3_back_vis'>
+          <pose>5.3774 1.7602 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_3_leg_vis'>
+          <pose>5.4546 1.7602 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_4_col'>
+          <pose>5.4546 2.3610 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_4_seat_vis'>
+          <pose>5.4546 2.3610 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_4_back_vis'>
+          <pose>5.3774 2.3610 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_4_leg_vis'>
+          <pose>5.4546 2.3610 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_5_col'>
+          <pose>5.4546 2.9619 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_5_seat_vis'>
+          <pose>5.4546 2.9619 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_5_back_vis'>
+          <pose>5.3774 2.9619 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_5_leg_vis'>
+          <pose>5.4546 2.9619 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_6_col'>
+          <pose>5.4546 3.5628 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_6_seat_vis'>
+          <pose>5.4546 3.5628 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_6_back_vis'>
+          <pose>5.3774 3.5628 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_6_leg_vis'>
+          <pose>5.4546 3.5628 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_7_col'>
+          <pose>5.4546 4.1636 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_7_seat_vis'>
+          <pose>5.4546 4.1636 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_7_back_vis'>
+          <pose>5.3774 4.1636 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_7_leg_vis'>
+          <pose>5.4546 4.1636 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_8_col'>
+          <pose>5.4546 4.7645 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_8_seat_vis'>
+          <pose>5.4546 4.7645 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_8_back_vis'>
+          <pose>5.3774 4.7645 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_8_leg_vis'>
+          <pose>5.4546 4.7645 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_1_col'>
+          <pose>7.1628 0.5584 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_1_seat_vis'>
+          <pose>7.1628 0.5584 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_1_back_vis'>
+          <pose>7.2400 0.5584 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_1_leg_vis'>
+          <pose>7.1628 0.5584 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_2_col'>
+          <pose>7.1628 1.1593 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_2_seat_vis'>
+          <pose>7.1628 1.1593 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_2_back_vis'>
+          <pose>7.2400 1.1593 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_2_leg_vis'>
+          <pose>7.1628 1.1593 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_3_col'>
+          <pose>7.1628 1.7602 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_3_seat_vis'>
+          <pose>7.1628 1.7602 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_3_back_vis'>
+          <pose>7.2400 1.7602 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_3_leg_vis'>
+          <pose>7.1628 1.7602 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_4_col'>
+          <pose>7.1628 2.3610 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_4_seat_vis'>
+          <pose>7.1628 2.3610 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_4_back_vis'>
+          <pose>7.2400 2.3610 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_4_leg_vis'>
+          <pose>7.1628 2.3610 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_5_col'>
+          <pose>7.1628 2.9619 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_5_seat_vis'>
+          <pose>7.1628 2.9619 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_5_back_vis'>
+          <pose>7.2400 2.9619 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_5_leg_vis'>
+          <pose>7.1628 2.9619 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_6_col'>
+          <pose>7.1628 3.5628 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_6_seat_vis'>
+          <pose>7.1628 3.5628 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_6_back_vis'>
+          <pose>7.2400 3.5628 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_6_leg_vis'>
+          <pose>7.1628 3.5628 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_7_col'>
+          <pose>7.1628 4.1636 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_7_seat_vis'>
+          <pose>7.1628 4.1636 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_7_back_vis'>
+          <pose>7.2400 4.1636 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_7_leg_vis'>
+          <pose>7.1628 4.1636 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_8_col'>
+          <pose>7.1628 4.7645 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_8_seat_vis'>
+          <pose>7.1628 4.7645 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_8_back_vis'>
+          <pose>7.2400 4.7645 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_8_leg_vis'>
+          <pose>7.1628 4.7645 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Mesa 3 (Alumnos) -->
+    <model name='mesa_3'>
+      <static>true</static>
+      <link name='mesa_3_link'>
+        <collision name='mesa_3_col'>
+          <pose>9.6425 5.8515 0.3750 0 0 0</pose>
+          <geometry><box><size>1.5050 4.8069 0.7500</size></box></geometry>
+        </collision>
+        <visual name='mesa_3_top_vis'>
+          <pose>9.6425 5.8515 0.7300 0 0 0</pose>
+          <geometry><box><size>1.5050 4.8069 0.0400</size></box></geometry>
+          <material>
+            <ambient>0.82 0.72 0.56 1</ambient>
+            <diffuse>0.86 0.75 0.60 1</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+        <visual name='mesa_3_frame_vis'>
+          <pose>9.6425 5.8515 0.3550 0 0 0</pose>
+          <geometry><box><size>1.4297 4.7108 0.7100</size></box></geometry>
+          <material>
+            <ambient>0.18 0.18 0.20 1</ambient>
+            <diffuse>0.22 0.22 0.24 1</diffuse>
+            <specular>0.3 0.3 0.3 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Sillas para Mesa 3 (Alumnos) -->
+    <model name='sillas_mesa_3'>
+      <static>true</static>
+      <link name='sillas_mesa_3_link'>
+        <collision name='chair_izq_1_col'>
+          <pose>8.7884 3.7485 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_1_seat_vis'>
+          <pose>8.7884 3.7485 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_1_back_vis'>
+          <pose>8.7112 3.7485 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_1_leg_vis'>
+          <pose>8.7884 3.7485 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_2_col'>
+          <pose>8.7884 4.3494 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_2_seat_vis'>
+          <pose>8.7884 4.3494 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_2_back_vis'>
+          <pose>8.7112 4.3494 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_2_leg_vis'>
+          <pose>8.7884 4.3494 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_3_col'>
+          <pose>8.7884 4.9502 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_3_seat_vis'>
+          <pose>8.7884 4.9502 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_3_back_vis'>
+          <pose>8.7112 4.9502 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_3_leg_vis'>
+          <pose>8.7884 4.9502 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_4_col'>
+          <pose>8.7884 5.5511 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_4_seat_vis'>
+          <pose>8.7884 5.5511 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_4_back_vis'>
+          <pose>8.7112 5.5511 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_4_leg_vis'>
+          <pose>8.7884 5.5511 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_5_col'>
+          <pose>8.7884 6.1520 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_5_seat_vis'>
+          <pose>8.7884 6.1520 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_5_back_vis'>
+          <pose>8.7112 6.1520 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_5_leg_vis'>
+          <pose>8.7884 6.1520 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_6_col'>
+          <pose>8.7884 6.7528 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_6_seat_vis'>
+          <pose>8.7884 6.7528 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_6_back_vis'>
+          <pose>8.7112 6.7528 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_6_leg_vis'>
+          <pose>8.7884 6.7528 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_7_col'>
+          <pose>8.7884 7.3537 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_7_seat_vis'>
+          <pose>8.7884 7.3537 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_7_back_vis'>
+          <pose>8.7112 7.3537 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_7_leg_vis'>
+          <pose>8.7884 7.3537 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_izq_8_col'>
+          <pose>8.7884 7.9546 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_izq_8_seat_vis'>
+          <pose>8.7884 7.9546 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_8_back_vis'>
+          <pose>8.7112 7.9546 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_izq_8_leg_vis'>
+          <pose>8.7884 7.9546 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_1_col'>
+          <pose>10.4966 3.7485 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_1_seat_vis'>
+          <pose>10.4966 3.7485 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_1_back_vis'>
+          <pose>10.5738 3.7485 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_1_leg_vis'>
+          <pose>10.4966 3.7485 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_2_col'>
+          <pose>10.4966 4.3494 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_2_seat_vis'>
+          <pose>10.4966 4.3494 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_2_back_vis'>
+          <pose>10.5738 4.3494 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_2_leg_vis'>
+          <pose>10.4966 4.3494 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_3_col'>
+          <pose>10.4966 4.9502 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_3_seat_vis'>
+          <pose>10.4966 4.9502 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_3_back_vis'>
+          <pose>10.5738 4.9502 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_3_leg_vis'>
+          <pose>10.4966 4.9502 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_4_col'>
+          <pose>10.4966 5.5511 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_4_seat_vis'>
+          <pose>10.4966 5.5511 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_4_back_vis'>
+          <pose>10.5738 5.5511 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_4_leg_vis'>
+          <pose>10.4966 5.5511 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_5_col'>
+          <pose>10.4966 6.1520 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_5_seat_vis'>
+          <pose>10.4966 6.1520 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_5_back_vis'>
+          <pose>10.5738 6.1520 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_5_leg_vis'>
+          <pose>10.4966 6.1520 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_6_col'>
+          <pose>10.4966 6.7528 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_6_seat_vis'>
+          <pose>10.4966 6.7528 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_6_back_vis'>
+          <pose>10.5738 6.7528 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_6_leg_vis'>
+          <pose>10.4966 6.7528 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_7_col'>
+          <pose>10.4966 7.3537 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_7_seat_vis'>
+          <pose>10.4966 7.3537 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_7_back_vis'>
+          <pose>10.5738 7.3537 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_7_leg_vis'>
+          <pose>10.4966 7.3537 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <collision name='chair_der_8_col'>
+          <pose>10.4966 7.9546 0.4500 0 0 0</pose>
+          <geometry><box><size>0.2032 0.4507 0.9000</size></box></geometry>
+        </collision>
+        <visual name='chair_der_8_seat_vis'>
+          <pose>10.4966 7.9546 0.4500 0 0 0</pose>
+          <geometry><box><size>0.1869 0.4056 0.04</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_8_back_vis'>
+          <pose>10.5738 7.9546 0.6100 0 0 0</pose>
+          <geometry><box><size>0.025 0.3831 0.3200</size></box></geometry>
+          <material><ambient>0.12 0.30 0.60 1</ambient><diffuse>0.16 0.38 0.72 1</diffuse></material>
+        </visual>
+        <visual name='chair_der_8_leg_vis'>
+          <pose>10.4966 7.9546 0.2250 0 0 0</pose>
+          <geometry><cylinder><radius>0.025</radius><length>0.4500</length></cylinder></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Mesa Robots -->
+    <model name='mesa_robots'>
+      <static>true</static>
+      <link name='mesa_robots_link'>
+        <collision name='mesa_robots_col'>
+          <pose>12.7413 6.0960 0.3750 0 0 0</pose>
+          <geometry><box><size>1.4414 4.3180 0.7500</size></box></geometry>
+        </collision>
+        <visual name='mesa_robots_top_vis'>
+          <pose>12.7413 6.0960 0.7300 0 0 0</pose>
+          <geometry><box><size>1.4414 4.3180 0.0400</size></box></geometry>
+          <material>
+            <ambient>0.82 0.72 0.56 1</ambient>
+            <diffuse>0.86 0.75 0.60 1</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+          </material>
+        </visual>
+        <visual name='mesa_robots_frame_vis'>
+          <pose>12.7413 6.0960 0.3550 0 0 0</pose>
+          <geometry><box><size>1.3694 4.2316 0.7100</size></box></geometry>
+          <material>
+            <ambient>0.18 0.18 0.20 1</ambient>
+            <diffuse>0.22 0.22 0.24 1</diffuse>
+            <specular>0.3 0.3 0.3 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Pizarra blanca en la pared frontal -->
+    <model name='pizarra'>
+      <static>true</static>
+      <pose>3.5 0.02 1.45 0 0 0</pose>
+      <link name='link'>
+        <visual name='board'>
+          <geometry><box><size>2.80 0.02 1.20</size></box></geometry>
+          <material><ambient>0.98 0.98 0.98 1</ambient><diffuse>0.98 0.98 0.98 1</diffuse><specular>0.4 0.4 0.4 1</specular></material>
+        </visual>
+        <visual name='frame'>
+          <geometry><box><size>2.84 0.025 1.24</size></box></geometry>
+          <material><ambient>0.5 0.5 0.5 1</ambient><diffuse>0.6 0.6 0.6 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

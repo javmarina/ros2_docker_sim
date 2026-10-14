@@ -5,6 +5,7 @@ or directly: `python test_launcher.py`
 """
 
 import sys
+import json
 import tempfile
 from pathlib import Path
 
@@ -22,7 +23,13 @@ from config_store import ConfigStore
 from physical_tab import PhysicalRobotTab
 from docker_service import ContainerState
 from main_window import ModernSimulationLauncher
-from robot_registry import get_all_robots, get_robot_by_id
+from robot_registry import (
+    get_all_robots,
+    get_robot_by_id,
+    SimulationWorld,
+    ScenarioId,
+    RobotId
+)
 
 
 def test_theme_palettes_and_stylesheet():
@@ -133,31 +140,58 @@ def test_main_window_integration():
 
 
 def test_robot_registry():
-    """Validates robot profiles, scenarios, and command building."""
+    """Validates robot profiles, scenarios, enums, and command building."""
+    # Enum validation
+    assert SimulationWorld.is_valid("empty")
+    assert SimulationWorld.is_valid("wall")
+    assert SimulationWorld.is_valid("classroom")
+    assert not SimulationWorld.is_valid("warehouse")
+    assert SimulationWorld.from_str("non_existent") == SimulationWorld.EMPTY
+
+    assert ScenarioId.is_valid("nav2")
+    assert ScenarioId.is_valid("slam")
+    assert not ScenarioId.is_valid("teleport")
+
+    assert RobotId.is_valid("base")
+    assert RobotId.is_valid("generic")
+    assert RobotId.is_valid("turtlebot4")
+    assert not RobotId.is_valid("drone")
+
     robots = get_all_robots()
     assert len(robots) >= 2
-    tb4 = get_robot_by_id("turtlebot4")
+    tb4 = get_robot_by_id(RobotId.TURTLEBOT4)
     assert tb4 is not None
-    assert tb4.supported_worlds == ["empty", "warehouse", "depot", "maze"]
-    sc = tb4.get_scenario_by_id("slam")
+    assert tb4.supported_worlds == ["empty", "wall", "classroom"]
+    sc = tb4.get_scenario_by_id(ScenarioId.SLAM)
     assert sc is not None
-    cmd = tb4.build_command("slam", "depot")
+    cmd = tb4.build_command(ScenarioId.SLAM, SimulationWorld.EMPTY)
     assert "turtlebot4" in cmd or "slam" in cmd
     assert "turtlebot4_nodock.launch.py" in cmd
+    assert "world:=empty" in cmd
 
-    # Verificar que el dock está eliminado en TODOS los mundos
-    cmd_empty = tb4.build_command("sim_only", "empty")
+    # Verificar mundo empty
+    cmd_empty = tb4.build_command(ScenarioId.SIM_ONLY, SimulationWorld.EMPTY)
     assert "turtlebot4_nodock.launch.py" in cmd_empty
     assert "world:=empty" in cmd_empty
 
-    cmd_warehouse = tb4.build_command("sim_only", "warehouse")
-    assert "turtlebot4_nodock.launch.py" in cmd_warehouse
-    assert "world:=warehouse" in cmd_warehouse
+    # Verificar mundo wall
+    cmd_wall = tb4.build_command(ScenarioId.SIM_ONLY, SimulationWorld.WALL)
+    assert "turtlebot4_nodock.launch.py" in cmd_wall
+    assert "world:=wall" in cmd_wall
 
-    cmd_depot = tb4.build_command("nav2", "depot")
-    assert "turtlebot4_nodock.launch.py" in cmd_depot
-    assert "world:=depot" in cmd_depot
-    assert "nav2:=true" in cmd_depot
+    # Verificar mundo classroom con Nav2 (mundo con mapa -> localization:=true)
+    cmd_classroom = tb4.build_command(ScenarioId.NAV2, SimulationWorld.CLASSROOM)
+    assert "turtlebot4_nodock.launch.py" in cmd_classroom
+    assert "world:=classroom" in cmd_classroom
+    assert "nav2:=true" in cmd_classroom
+    assert "localization:=true" in cmd_classroom
+    assert "x:=1.5 y:=1.5" in cmd_classroom
+
+    # Verificar mundo sin mapa con Nav2 (empty -> slam:=true dinámico)
+    cmd_empty_nav2 = tb4.build_command(ScenarioId.NAV2, SimulationWorld.EMPTY)
+    assert "turtlebot4_nodock.launch.py" in cmd_empty_nav2
+    assert "world:=empty" in cmd_empty_nav2
+    assert "slam:=true" in cmd_empty_nav2
 
 
 def test_config_store_workspace_validation():
@@ -308,6 +342,40 @@ def test_container_state_and_button_robustness():
         QtWidgets.QApplication.processEvents()
 
 
+def test_config_store_world_fallback():
+    """Validates that any obsolete world, robot, or scenario previously saved in settings defaults safely."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        config_file = Path(tmp_dir) / "config.json"
+        config_file.write_text(json.dumps({"world_name": "warehouse"}), encoding="utf-8")
+        store = ConfigStore(fallback_dir=Path(tmp_dir))
+        store._config_path = config_file
+        store.load()
+        assert store.get("world_name") == SimulationWorld.EMPTY.value
+
+        config_file.write_text(json.dumps({"world_name": "depot"}), encoding="utf-8")
+        store.load()
+        assert store.get("world_name") == SimulationWorld.EMPTY.value
+
+        config_file.write_text(json.dumps({"world_name": "maze"}), encoding="utf-8")
+        store.load()
+        assert store.get("world_name") == SimulationWorld.EMPTY.value
+
+        # Valid worlds preserved
+        config_file.write_text(json.dumps({"world_name": "wall"}), encoding="utf-8")
+        store.load()
+        assert store.get("world_name") == SimulationWorld.WALL.value
+
+        config_file.write_text(json.dumps({"world_name": "classroom"}), encoding="utf-8")
+        store.load()
+        assert store.get("world_name") == SimulationWorld.CLASSROOM.value
+
+        # Fallback for invalid robot_id and scenario_id
+        config_file.write_text(json.dumps({"robot_id": "invalid_bot", "scenario_id": "invalid_sc"}), encoding="utf-8")
+        store.load()
+        assert store.get("robot_id") == RobotId.BASE.value
+        assert store.get("scenario_id") == ScenarioId.CONTAINER_ONLY.value
+
+
 if __name__ == "__main__":
     print("Running tests...")
     test_theme_palettes_and_stylesheet()
@@ -326,10 +394,12 @@ if __name__ == "__main__":
     print("[OK] test_robot_registry passed")
     test_config_store_workspace_validation()
     print("[OK] test_config_store_workspace_validation passed")
+    test_config_store_world_fallback()
+    print("[OK] test_config_store_world_fallback passed")
     test_dialog_stylesheets_and_variants()
     print("[OK] test_dialog_stylesheets_and_variants passed")
     test_container_state_and_button_robustness()
     print("[OK] test_container_state_and_button_robustness passed")
-    print("\nAll 10 test suites passed successfully!")
+    print("\nAll 11 test suites passed successfully!")
 
 

@@ -10,6 +10,8 @@ import platform
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from robot_registry import SimulationWorld, ScenarioId, RobotId
+
 
 class ConfigStore:
     """Maneja la carga y almacenamiento seguro de la configuración del usuario en AppData."""
@@ -17,12 +19,12 @@ class ConfigStore:
     APP_DIR_NAME = "ros2_nav_launcher"
     CONFIG_FILE_NAME = "config.json"
 
-    # Valores predeterminados seguros
+    # Valores predeterminados seguros basados en Enums
     DEFAULTS: Dict[str, Any] = {
         "workspace_path": "",
-        "robot_id": "base",
-        "scenario_id": "container_only",
-        "world_name": "warehouse",
+        "robot_id": RobotId.BASE.value,
+        "scenario_id": ScenarioId.CONTAINER_ONLY.value,
+        "world_name": SimulationWorld.EMPTY.value,
         "ros_domain_id": "42",
         "web_port": "6080",
         "extra_args": "use_sim_time:=true",
@@ -91,6 +93,17 @@ class ConfigStore:
                 # Si el archivo está corrupto, usar valores predeterminados
                 pass
 
+        # Si el usuario tenía configurado previamente otro mundo desconocido u obsoleto, usar por defecto SimulationWorld.EMPTY
+        if not SimulationWorld.is_valid(self._data.get("world_name")):
+            self._data["world_name"] = SimulationWorld.EMPTY.value
+
+        # Asegurar también robot_id y scenario_id válidos
+        if not RobotId.is_valid(self._data.get("robot_id")):
+            self._data["robot_id"] = RobotId.BASE.value
+
+        if not ScenarioId.is_valid(self._data.get("scenario_id")):
+            self._data["scenario_id"] = ScenarioId.CONTAINER_ONLY.value
+
         return self._data
 
     def save(self) -> bool:
@@ -105,7 +118,14 @@ class ConfigStore:
 
     def get(self, key: str, default: Any = None) -> Any:
         """Obtiene un valor de la configuración."""
-        return self._data.get(key, self.DEFAULTS.get(key, default))
+        val = self._data.get(key, self.DEFAULTS.get(key, default))
+        if key == "world_name" and not SimulationWorld.is_valid(val):
+            return SimulationWorld.EMPTY.value
+        if key == "robot_id" and not RobotId.is_valid(val):
+            return RobotId.BASE.value
+        if key == "scenario_id" and not ScenarioId.is_valid(val):
+            return ScenarioId.CONTAINER_ONLY.value
+        return val
 
     def set(self, key: str, value: Any, auto_save: bool = True) -> None:
         """Establece un valor en la configuración y opcionalmente guarda en disco."""

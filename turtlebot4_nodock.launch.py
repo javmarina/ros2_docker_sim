@@ -12,16 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Launch file para TurtleBot 4 en cualquier mundo de Gazebo SIN docking station.
-# Elimina el dock en todos los mundos (empty, warehouse, depot, maze) permitiendo
+# Launch file para TurtleBot 4 en Gazebo SIN docking station.
+# Elimina el dock en el mundo de simulación (empty) permitiendo
 # giros y traslaciones 360° libres sin colisiones contra la base de carga.
+
+import os
 
 from ament_index_python.packages import get_package_share_directory
 
 from irobot_create_common_bringup.namespace import GetNamespacedName
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -50,8 +52,8 @@ ARGUMENTS = [
     DeclareLaunchArgument('nav2', default_value='false',
                           choices=['true', 'false'],
                           description='Whether to launch Nav2'),
-    DeclareLaunchArgument('world', default_value='warehouse',
-                          description='Simulation World (empty, warehouse, depot, maze)'),
+    DeclareLaunchArgument('world', default_value='empty',
+                          description='Simulation World (empty, wall, classroom)'),
 ]
 
 for pose_element in ['x', 'y', 'z', 'yaw']:
@@ -197,14 +199,26 @@ def generate_launch_description():
         ),
     ])
 
-    localization = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([localization_launch]),
-        launch_arguments=[
-            ('namespace', namespace),
-            ('use_sim_time', use_sim_time)
-        ],
-        condition=IfCondition(LaunchConfiguration('localization'))
-    )
+    def setup_localization(context, *args, **kwargs):
+        loc_val = LaunchConfiguration('localization').perform(context)
+        if loc_val.lower() not in ('true', '1'):
+            return []
+
+        world_val = LaunchConfiguration('world').perform(context)
+        map_path = os.path.join(pkg_turtlebot4_navigation, 'maps', f'{world_val}.yaml')
+        if os.path.isfile(map_path):
+            return [
+                IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource([localization_launch]),
+                    launch_arguments=[
+                        ('namespace', namespace),
+                        ('use_sim_time', use_sim_time),
+                        ('map', map_path)
+                    ]
+                )
+            ]
+        # Si el mundo no dispone de mapa YAML (ej. empty, wall), no lanzar AMCL
+        return []
 
     slam = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([slam_launch]),
@@ -236,7 +250,7 @@ def generate_launch_description():
     ld.add_action(param_file_cmd)
     ld.add_action(gazebo)
     ld.add_action(spawn_robot_group_action)
-    ld.add_action(localization)
+    ld.add_action(OpaqueFunction(function=setup_localization))
     ld.add_action(slam)
     ld.add_action(nav2)
     ld.add_action(rviz)

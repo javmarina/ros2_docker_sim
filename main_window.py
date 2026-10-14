@@ -18,7 +18,10 @@ from robot_registry import (
     get_all_robots,
     get_robot_by_id,
     get_robot_by_name,
-    RobotProfile
+    RobotProfile,
+    SimulationWorld,
+    ScenarioId,
+    RobotId
 )
 from docker_service import (
     DockerService,
@@ -897,7 +900,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self.ent_ws_path.setText(saved_ws)
             self._update_workspace_validation()
 
-            saved_robot_id = self.config_store.get("robot_id", "base")
+            saved_robot_id = self.config_store.get("robot_id", RobotId.BASE.value)
             robot_profile = get_robot_by_id(saved_robot_id) or get_robot_by_name(saved_robot_id) or get_all_robots()[0]
             self.cbo_robot.blockSignals(True)
             idx_r = self.cbo_robot.findData(robot_profile.id)
@@ -911,16 +914,16 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
             self._update_worlds_and_scenarios(robot_profile)
 
-            saved_world = self.config_store.get("world_name", "warehouse")
+            saved_world = self.config_store.get("world_name", SimulationWorld.EMPTY.value)
             idx_w = self.cbo_world.findText(saved_world)
             if idx_w >= 0:
                 self.cbo_world.blockSignals(True)
                 self.cbo_world.setCurrentIndex(idx_w)
                 self.cbo_world.blockSignals(False)
 
-            saved_sc = self.config_store.get("scenario_id", "container_only")
+            saved_sc = self.config_store.get("scenario_id", ScenarioId.CONTAINER_ONLY.value)
             if saved_sc == "bash":
-                saved_sc = "container_only"
+                saved_sc = ScenarioId.CONTAINER_ONLY.value
             sc_obj = robot_profile.get_scenario_by_id(saved_sc)
             if sc_obj:
                 idx_s = self.cbo_scenario.findText(sc_obj.name)
@@ -1043,11 +1046,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 self.lbl_scenario_desc.setText("")
 
         is_container_only = (
-            scenario_id in ("container_only", "bash")
+            scenario_id in (ScenarioId.CONTAINER_ONLY.value, "bash")
             or "solo contenedor" in self.cbo_scenario.currentText().lower()
             or "modo libre" in self.cbo_scenario.currentText().lower()
         )
-        is_base_robot = (robot_profile and robot_profile.id == "base")
+        is_base_robot = (robot_profile and robot_profile.id == RobotId.BASE.value)
 
         if is_container_only:
             self.btn_launch.setText("Iniciar contenedor")
@@ -1597,9 +1600,9 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
                 selected_sc_name = self.cbo_scenario.currentText()
                 scenario_obj = robot_profile.get_scenario_by_name(selected_sc_name)
-                scenario_id = scenario_obj.id if scenario_obj else ("container_only" if is_container_only else "nav2")
+                scenario_id = scenario_obj.id if scenario_obj else (ScenarioId.CONTAINER_ONLY.value if is_container_only else ScenarioId.NAV2.value)
 
-                world_name = self.cbo_world.currentText().strip() or "warehouse"
+                world_name = self.cbo_world.currentText().strip() or SimulationWorld.EMPTY.value
                 extra_args = self.ent_extra_args.text().strip()
                 force_rebuild = self.chk_force_rebuild.isChecked()
                 domain_id = self.ent_domain_id.text().strip() or "42"
@@ -1657,7 +1660,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
                 if container_started:
                     self.sig_container_status.emit(ContainerState.RUNNING)
-                    if scenario_id in ("container_only", "bash"):
+                    if scenario_id in (ScenarioId.CONTAINER_ONLY.value, "bash"):
                         self._append_log("Abriendo terminal nativa conectada al contenedor...\n")
                         QtCore.QTimer.singleShot(1000, self._on_open_terminal)
                     else:
@@ -1666,7 +1669,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                     if self.active_sim_thread and self.active_sim_thread.isRunning():
                         # Si sigue corriendo el proceso aunque docker ps tardara, pasamos a RUNNING
                         self.sig_container_status.emit(ContainerState.RUNNING)
-                        if scenario_id in ("container_only", "bash"):
+                        if scenario_id in (ScenarioId.CONTAINER_ONLY.value, "bash"):
                             QtCore.QTimer.singleShot(1000, self._on_open_terminal)
                         else:
                             QtCore.QTimer.singleShot(1500, self._open_web_gui)
