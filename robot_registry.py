@@ -265,8 +265,7 @@ class RobotProfile:
 # --- Generadores de comandos para robots específicos ---
 
 
-def _build_env_prefix(force_rebuild: bool) -> str:
-    force_val = "1" if force_rebuild else "0"
+def _build_env_prefix(force_rebuild: bool) -> str:  # noqa: ARG001 (kept for API symmetry)
     return (
         "source /opt/ros/jazzy/setup.bash && "
         "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi"
@@ -300,9 +299,8 @@ def _build_turtlebot4_command(
     prefix = f"{env} && {ensure_cmd}" if ensure_cmd else env
 
     # Spawn pose: en classroom, spawnear en el corredor despejado (x=1.5, y=1.5) si el usuario no especifica coordenadas
-    if world_enum == SimulationWorld.CLASSROOM:
-        if "x:=" not in args and "y:=" not in args:
-            args = f"x:=1.5 y:=1.5 yaw:=0.0 {args}".strip()
+    if world_enum == SimulationWorld.CLASSROOM and "x:=" not in args and "y:=" not in args:
+        args = f"x:=1.5 y:=1.5 yaw:=0.0 {args}".strip()
 
     sc_str = scenario_id.value if isinstance(scenario_id, Enum) else scenario_id
 

@@ -4,6 +4,7 @@ Main application window for the ROS 2 Simulation Launcher.
 
 import logging
 import os
+import shutil
 import sys
 import threading
 import time
@@ -15,6 +16,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from config_store import ConfigStore
 from docker_service import (
+    BUILD_CACHE_VOLUMES,
     COURSE_IMAGE_NAME,
     DEFAULT_CONTAINER_NAME,
     DEFAULT_NOVNC_PORT,
@@ -2197,57 +2199,54 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         if cmd:
             self._execute_quick_command(cmd)
 
-    def _on_compile_workspace(self):
+    def _require_docker_running(self) -> bool:
+        """Warns the user and returns False unless the Docker daemon is up and answering."""
         if self._docker_state == DockerState.STARTING:
             self._show_warning_box(
                 "Docker",
                 "Docker Desktop se está iniciando en este momento.\nPor favor espera a que el servicio esté listo.",
             )
-            return
-
-        image_name = COURSE_IMAGE_NAME
+            return False
         running, err = DockerService.check_docker_running(timeout=4.0)
         if not running:
             QtWidgets.QMessageBox.critical(
                 self, "Docker", f"Docker no está en ejecución:\n\n{err}"
             )
+        return running
+
+    def _post_info_box(self, title: str, text: str):
+        """Shows an information box on the GUI thread (safe to call from workers)."""
+        QtCore.QMetaObject.invokeMethod(
+            self,
+            "_show_info_box",
+            QtCore.Qt.ConnectionType.QueuedConnection,
+            QtCore.Q_ARG(str, title),
+            QtCore.Q_ARG(str, text),
+        )
+
+    def _on_compile_workspace(self):
+        if not self._require_docker_running():
             return
 
         ws_path = self.ent_ws_path.text().strip()
         self.tab_widget.setCurrentIndex(1)  # Logs
         self._append_log("\n=== Compilando paquetes del workspace con colcon... ===\n")
 
-        def _worker():
-            build_cmd = [
-                "docker",
-                "run",
-                "--rm",
-                "-v",
-                "ros2_jazzy_build_cache:/ros2_ws/build",
-                "-v",
-                "ros2_jazzy_install_cache:/ros2_ws/install",
-                "-v",
-                "ros2_jazzy_log_cache:/ros2_ws/log",
-            ]
-            if ws_path and os.path.exists(ws_path):
-                norm_path = Path(ws_path).resolve().as_posix()
-                build_cmd.extend(["-v", f"{norm_path}:/ros2_ws/src:rw"])
-
-            build_cmd.append(image_name)
-            build_cmd.extend(
-                [
-                    "/bin/bash",
-                    "-c",
-                    "source /opt/ros/jazzy/setup.bash && cd /ros2_ws && colcon build --symlink-install",
-                ]
-            )
-
-            self.compile_runner = ProcessRunnerThread(build_cmd)
-            self.compile_runner.signals.line_received.connect(self._append_log)
-            self.compile_runner.signals.finished.connect(self._on_compile_finished)
-            self.compile_runner.start()
-
-        threading.Thread(target=_worker, daemon=True).start()
+        build_cmd = [
+            "docker",
+            "run",
+            "--rm",
+            *DockerService.build_cache_mount_args(),
+            *DockerService.workspace_mount_args(ws_path),
+            COURSE_IMAGE_NAME,
+            "/bin/bash",
+            "-c",
+            "source /opt/ros/jazzy/setup.bash && cd /ros2_ws && colcon build --symlink-install",
+        ]
+        self.compile_runner = ProcessRunnerThread(build_cmd)
+        self.compile_runner.signals.line_received.connect(self._append_log)
+        self.compile_runner.signals.finished.connect(self._on_compile_finished)
+        self.compile_runner.start()
 
     def _on_compile_finished(self, rc: int):
         if rc == 0:
@@ -2262,18 +2261,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             )
 
     def _on_clean_compilation(self):
-        if self._docker_state == DockerState.STARTING:
-            self._show_warning_box(
-                "Docker",
-                "Docker Desktop se está iniciando en este momento.\nPor favor espera a que el servicio esté listo.",
-            )
-            return
-
-        running, err = DockerService.check_docker_running(timeout=4.0)
-        if not running:
-            QtWidgets.QMessageBox.critical(
-                self, "Docker", f"Docker no está en ejecución:\n\n{err}"
-            )
+        if not self._require_docker_running():
             return
 
         answer = QtWidgets.QMessageBox.question(
@@ -2304,42 +2292,15 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 for folder in ["build", "install", "log"]:
                     target_dir = host_ws_root / folder
                     if target_dir.is_dir():
-                        try:
-                            import shutil
-
-                            shutil.rmtree(target_dir, ignore_errors=True)
-                            deleted_items.append(f"Directorio local '{folder}/'")
-                        except Exception as e:
-                            logger.warning(
-                                "No se pudo eliminar %s en host: %s", target_dir, e
-                            )
+                        shutil.rmtree(target_dir, ignore_errors=True)
+                        deleted_items.append(f"Directorio local '{folder}/'")
 
             # 2. Clean docker volumes
-            vols_to_clean = [
-                "ros2_jazzy_build_cache",
-                "ros2_jazzy_install_cache",
-                "ros2_jazzy_log_cache",
-            ]
-            for vol in vols_to_clean:
-                clean_cmd = ["docker", "volume", "rm", "-f", vol]
-                try:
-                    subprocess.run(
-                        clean_cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        timeout=5.0,
-                        creationflags=subprocess.CREATE_NO_WINDOW
-                        if sys.platform == "win32"
-                        else 0,
-                    )
-                    deleted_items.append(f"Volumen Docker '{vol}'")
-                except Exception as e:
-                    logger.warning("No se pudo resetear el volumen %s: %s", vol, e)
-
-            # 3. Clean inside container if running
-            if DockerService.is_container_running(DEFAULT_CONTAINER_NAME):
-                DockerService.clean_build_volumes(DEFAULT_CONTAINER_NAME)
-                deleted_items.append("Directorios temporales internos del contenedor")
+            ok, msg = DockerService.clean_build_volumes()
+            if ok:
+                deleted_items.extend(f"Volumen Docker '{vol}'" for vol in BUILD_CACHE_VOLUMES)
+            else:
+                logger.warning("No se pudieron resetear los volúmenes: %s", msg)
 
             self._append_log(
                 "\n[Limpieza completada con éxito]\nElementos procesados:\n"
@@ -2350,15 +2311,9 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 "\nPuedes pulsar 'Compilar workspace' para reconstruir desde cero.\n\n"
             )
 
-            QtCore.QMetaObject.invokeMethod(
-                self,
-                "_show_info_box",
-                QtCore.Qt.ConnectionType.QueuedConnection,
-                QtCore.Q_ARG(str, "Limpieza de Compilación"),
-                QtCore.Q_ARG(
-                    str,
-                    "Los directorios y volúmenes de compilación ('build', 'install', 'log') han sido eliminados correctamente.\n\nEl workspace está listo para compilarse desde cero.",
-                ),
+            self._post_info_box(
+                "Limpieza de Compilación",
+                "Los directorios y volúmenes de compilación ('build', 'install', 'log') han sido eliminados correctamente.\n\nEl workspace está listo para compilarse desde cero.",
             )
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -2379,15 +2334,9 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self._append_log("\nLimpiando volúmenes de caché de compilación...\n")
 
         def _worker():
-            ok, msg = DockerService.clean_build_volumes(DEFAULT_CONTAINER_NAME)
+            ok, msg = DockerService.clean_build_volumes()
             self._append_log(f"{msg}\n")
-            QtCore.QMetaObject.invokeMethod(
-                self,
-                "_show_info_box",
-                QtCore.Qt.ConnectionType.QueuedConnection,
-                QtCore.Q_ARG(str, "Caché Docker"),
-                QtCore.Q_ARG(str, msg),
-            )
+            self._post_info_box("Caché Docker", msg)
 
         threading.Thread(target=_worker, daemon=True).start()
 

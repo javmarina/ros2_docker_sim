@@ -39,6 +39,13 @@ class ConfigStore:
         "robot_remote_ws": "~/turtlebot4_ws",
     }
 
+    # Enum-backed settings: key -> (enum class, safe fallback member)
+    _ENUM_FALLBACKS = {
+        "world_name": (SimulationWorld, SimulationWorld.EMPTY),
+        "robot_id": (RobotId, RobotId.BASE),
+        "scenario_id": (ScenarioId, ScenarioId.CONTAINER_ONLY),
+    }
+
     def __init__(self, fallback_dir: Path | None = None):
         self._fallback_dir = fallback_dir or Path(__file__).parent.resolve()
         self._config_path = self._resolve_config_path()
@@ -56,9 +63,7 @@ class ConfigStore:
                 else:
                     base_dir = Path.home() / "AppData" / "Roaming" / self.APP_DIR_NAME
             elif "darwin" in system:
-                base_dir = (
-                    Path.home() / "Library" / "Application Support" / self.APP_DIR_NAME
-                )
+                base_dir = Path.home() / "Library" / "Application Support" / self.APP_DIR_NAME
             else:
                 # Linux u otros POSIX
                 xdg_config = os.getenv("XDG_CONFIG_HOME")
@@ -95,16 +100,8 @@ class ConfigStore:
                 # Si el archivo está corrupto, usar valores predeterminados
                 pass
 
-        # Si el usuario tenía configurado previamente otro mundo desconocido u obsoleto, usar por defecto SimulationWorld.EMPTY
-        if not SimulationWorld.is_valid(self._data.get("world_name")):
-            self._data["world_name"] = SimulationWorld.EMPTY.value
-
-        # Asegurar también robot_id y scenario_id válidos
-        if not RobotId.is_valid(self._data.get("robot_id")):
-            self._data["robot_id"] = RobotId.BASE.value
-
-        if not ScenarioId.is_valid(self._data.get("scenario_id")):
-            self._data["scenario_id"] = ScenarioId.CONTAINER_ONLY.value
+        for key in self._ENUM_FALLBACKS:
+            self._data[key] = self._sanitize(key, self._data.get(key))
 
         return self._data
 
@@ -118,16 +115,16 @@ class ConfigStore:
         except Exception:
             return False
 
+    def _sanitize(self, key: str, value: Any) -> Any:
+        """Replaces obsolete/unknown enum-backed values with their safe default."""
+        enum_cls, fallback = self._ENUM_FALLBACKS.get(key, (None, None))
+        if enum_cls and not enum_cls.is_valid(value):
+            return fallback.value
+        return value
+
     def get(self, key: str, default: Any = None) -> Any:
         """Obtiene un valor de la configuración."""
-        val = self._data.get(key, self.DEFAULTS.get(key, default))
-        if key == "world_name" and not SimulationWorld.is_valid(val):
-            return SimulationWorld.EMPTY.value
-        if key == "robot_id" and not RobotId.is_valid(val):
-            return RobotId.BASE.value
-        if key == "scenario_id" and not ScenarioId.is_valid(val):
-            return ScenarioId.CONTAINER_ONLY.value
-        return val
+        return self._sanitize(key, self._data.get(key, self.DEFAULTS.get(key, default)))
 
     def set(self, key: str, value: Any, auto_save: bool = True) -> None:
         """Establece un valor en la configuración y opcionalmente guarda en disco."""
@@ -160,17 +157,12 @@ class ConfigStore:
         # Inspeccionar si tiene estructura de paquetes ROS 2
         try:
             has_src = (p / "src").is_dir()
-            has_direct_package = (p / "package.xml").exists()
-            has_sub_packages = any(p.glob("*/package.xml")) or (
-                has_src and any((p / "src").glob("*/package.xml"))
-            )
-
             if has_src and any((p / "src").glob("*/package.xml")):
                 return (
                     True,
                     "Workspace ROS 2 detectado (contiene carpeta src/ con paquetes).",
                 )
-            elif has_direct_package or has_sub_packages:
+            elif (p / "package.xml").exists() or any(p.glob("*/package.xml")):
                 return True, "Paquetes ROS 2 detectados en la carpeta."
             else:
                 return True, "Carpeta válida (se montará en /ros2_ws/src)."

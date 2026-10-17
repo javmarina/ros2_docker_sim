@@ -20,6 +20,8 @@ from PySide6 import QtCore, QtGui
 
 logger = logging.getLogger("launcher")
 
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
 
 # ---------------------------------------------------------------------------
 # Process Runner (QThread wrapper for streaming subprocess output)
@@ -43,9 +45,6 @@ class ProcessRunnerThread(QtCore.QThread):
 
     def run(self):
         try:
-            creationflags = (
-                subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            )
             self.proc = subprocess.Popen(
                 self.cmd,
                 cwd=self.cwd,
@@ -56,7 +55,7 @@ class ProcessRunnerThread(QtCore.QThread):
                 errors="replace",
                 bufsize=1,
                 universal_newlines=True,
-                creationflags=creationflags,
+                creationflags=_NO_WINDOW,
             )
             for line in iter(self.proc.stdout.readline, ""):
                 self.signals.line_received.emit(line)
@@ -111,11 +110,7 @@ class AnsiColorParser:
                 continue
             if token.startswith("\x1b["):
                 if token.endswith("m"):
-                    params = (
-                        [int(p) for p in token[2:-1].split(";") if p]
-                        if token[2:-1]
-                        else [0]
-                    )
+                    params = [int(p) for p in token[2:-1].split(";") if p] if token[2:-1] else [0]
                     for code in params:
                         if code == 0:
                             self.current_format = QtGui.QTextCharFormat()
@@ -141,8 +136,6 @@ class AnsiColorParser:
 # ---------------------------------------------------------------------------
 
 DEFAULT_TURTLEBOT4_MAC = "e4:5f:01:bd:05:1a"
-
-_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
 def get_connected_ssid() -> str | None:
@@ -199,15 +192,13 @@ def get_connected_ssid() -> str | None:
                 ["nmcli", "-t", "-f", "active,ssid", "dev", "wifi"],
             ]:
                 try:
-                    out = subprocess.check_output(
-                        cmd, text=True, stderr=subprocess.DEVNULL
-                    )
-                    lines = [l.strip() for l in out.splitlines() if l.strip()]
+                    out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
+                    lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
                     if lines:
                         if cmd[0] == "nmcli":
-                            for l in lines:
-                                if l.startswith("yes:"):
-                                    return l.split(":", 1)[1]
+                            for ln in lines:
+                                if ln.startswith("yes:"):
+                                    return ln.split(":", 1)[1]
                         else:
                             return lines[0]
                 except Exception:
@@ -220,11 +211,9 @@ def get_connected_ssid() -> str | None:
 def get_local_ip() -> str:
     """Returns the local IP of the active network interface."""
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
     except Exception:
         try:
             return socket.gethostbyname(socket.gethostname())
@@ -252,20 +241,20 @@ def get_ip_from_mac(target_mac: str) -> str | None:
     return None
 
 
+def _ping_cmd(ip: str, timeout: float) -> list[str]:
+    """Builds a single-packet ping command for the current platform."""
+    if sys.platform == "win32":
+        return ["ping", "-n", "1", "-w", str(int(timeout * 1000)), ip]
+    return ["ping", "-c", "1", "-W", str(max(1, int(timeout))), ip]
+
+
 def ping_device(ip_address: str, timeout: float = 1.0) -> bool:
     """Checks whether a host is reachable via ICMP ping."""
     if not ip_address:
         return False
     try:
-        param = "-n" if sys.platform == "win32" else "-c"
-        w_param = "-w" if sys.platform == "win32" else "-W"
-        ms = (
-            str(int(timeout * 1000))
-            if sys.platform == "win32"
-            else str(max(1, int(timeout)))
-        )
         subprocess.check_output(
-            ["ping", param, "1", w_param, ms, ip_address],
+            _ping_cmd(ip_address, timeout),
             stderr=subprocess.DEVNULL,
             creationflags=_NO_WINDOW,
         )
@@ -284,18 +273,10 @@ def subnet_sweep(local_ip: str, timeout: float = 0.35) -> None:
         own = int(parts[-1])
         ips = [f"{prefix}.{i}" for i in range(1, 255) if i != own]
 
-        param = "-n" if sys.platform == "win32" else "-c"
-        w_param = "-w" if sys.platform == "win32" else "-W"
-        ms = (
-            str(int(timeout * 1000))
-            if sys.platform == "win32"
-            else str(max(1, int(timeout)))
-        )
-
         def _ping(ip):
             try:
                 subprocess.run(
-                    ["ping", param, "1", w_param, ms, ip],
+                    _ping_cmd(ip, timeout),
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     check=False,
@@ -349,9 +330,7 @@ def sftp_upload_dir(sftp, local_dir: Path, remote_dir: str, log_cb=None) -> int:
     local_p = Path(local_dir).resolve()
 
     for root, dirs, files in os.walk(local_p):
-        dirs[:] = [
-            d for d in dirs if d not in _SFTP_IGNORE_DIRS and not d.startswith(".")
-        ]
+        dirs[:] = [d for d in dirs if d not in _SFTP_IGNORE_DIRS and not d.startswith(".")]
         rel = os.path.relpath(root, local_p).replace("\\", "/")
         dest_sub = remote_dir if rel == "." else f"{remote_dir}/{rel}"
         _remote_mkdir_p(dest_sub)
@@ -402,6 +381,20 @@ def _clean_stale_askpass_files():
         pass
 
 
+def _write_askpass(content: str, suffix: str) -> str:
+    """Writes a self-deleting SSH_ASKPASS helper script and returns its path."""
+    path = os.path.join(
+        tempfile.gettempdir(),
+        f"tb4_askpass_{os.getpid()}_{int(time.time() * 1000)}.{suffix}",
+    )
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    if suffix == "sh":
+        os.chmod(path, 0o700)
+    _cleanup_temp_file(path)
+    return path
+
+
 def open_robot_ssh_terminal(
     ip: str, user: str, password: str, port: str, remote_ws: str
 ) -> tuple[bool, str]:
@@ -423,71 +416,41 @@ def open_robot_ssh_terminal(
 
     _clean_stale_askpass_files()
     auth_mode = "con autenticación automática" if password else "solicitando contraseña"
+    ssh = f"ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{ip}"
+    sh_askpass = f"#!/bin/sh\necho '{password}'\n"
 
     if sys.platform == "win32":
+        title = f'cmd.exe /c start "TurtleBot 4 SSH ({user}@{ip})" '
         if password:
-            askpass_path = os.path.join(
-                tempfile.gettempdir(),
-                f"tb4_askpass_{os.getpid()}_{int(time.time() * 1000)}.cmd",
+            askpass_path = _write_askpass(
+                f"@echo off\r\necho {password.replace('%', '%%')}\r\n", "cmd"
             )
-            with open(askpass_path, "w", encoding="utf-8") as f:
-                f.write(f"@echo off\r\necho {password.replace('%', '%%')}\r\n")
-            _cleanup_temp_file(askpass_path)
             cmd = (
-                f'cmd.exe /c start "TurtleBot 4 SSH ({user}@{ip})" '
-                f'cmd.exe /c "set "SSH_ASKPASS={askpass_path}" && '
+                f'{title}cmd.exe /c "set "SSH_ASKPASS={askpass_path}" && '
                 f'set "SSH_ASKPASS_REQUIRE=force" && '
-                f'ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{ip} "{remote_init_cmd}" || pause"'
+                f'{ssh} "{remote_init_cmd}" || pause"'
             )
         else:
-            cmd = (
-                f'cmd.exe /c start "TurtleBot 4 SSH ({user}@{ip})" '
-                f'ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{ip} "{remote_init_cmd}"'
-            )
+            cmd = f'{title}{ssh} "{remote_init_cmd}"'
         subprocess.Popen(cmd, shell=True)
         return True, f"Ventana SSH iniciada para {user}@{ip} ({auth_mode})"
 
     elif sys.platform == "darwin":
+        env = ""
         if password:
-            askpass_path = os.path.join(
-                tempfile.gettempdir(),
-                f"tb4_askpass_{os.getpid()}_{int(time.time() * 1000)}.sh",
-            )
-            with open(askpass_path, "w", encoding="utf-8") as f:
-                f.write(f"#!/bin/sh\necho '{password}'\n")
-            os.chmod(askpass_path, 0o700)
-            _cleanup_temp_file(askpass_path)
-            script = (
-                f'tell application "Terminal" to do script '
-                f'"export SSH_ASKPASS=\\"{askpass_path}\\" SSH_ASKPASS_REQUIRE=force; '
-                f'ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{ip} \\"{remote_init_cmd}\\""'
-            )
-        else:
-            script = (
-                f'tell application "Terminal" to do script '
-                f'"ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{ip} \\"{remote_init_cmd}\\""'
-            )
+            askpass_path = _write_askpass(sh_askpass, "sh")
+            env = f'export SSH_ASKPASS=\\"{askpass_path}\\" SSH_ASKPASS_REQUIRE=force; '
+        script = f'tell application "Terminal" to do script "{env}{ssh} \\"{remote_init_cmd}\\""'
         subprocess.Popen(["osascript", "-e", script])
         return True, f"Terminal SSH lanzada para {user}@{ip} (macOS, {auth_mode})"
 
     else:  # Linux
+        ssh_cmd = f"{ssh} '{remote_init_cmd}'"
         if password and shutil.which("sshpass"):
-            ssh_cmd = f"sshpass -p '{password}' ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{ip} '{remote_init_cmd}'"
+            ssh_cmd = f"sshpass -p '{password}' {ssh_cmd}"
         elif password:
-            askpass_path = os.path.join(
-                tempfile.gettempdir(),
-                f"tb4_askpass_{os.getpid()}_{int(time.time() * 1000)}.sh",
-            )
-            with open(askpass_path, "w", encoding="utf-8") as f:
-                f.write(f"#!/bin/sh\necho '{password}'\n")
-            os.chmod(askpass_path, 0o700)
-            _cleanup_temp_file(askpass_path)
-            ssh_cmd = (
-                f"env SSH_ASKPASS='{askpass_path}' SSH_ASKPASS_REQUIRE=force "
-                f"ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{ip} '{remote_init_cmd}'"
-            )
-        else:
-            ssh_cmd = f"ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{ip} '{remote_init_cmd}'"
+            askpass_path = _write_askpass(sh_askpass, "sh")
+            ssh_cmd = f"env SSH_ASKPASS='{askpass_path}' SSH_ASKPASS_REQUIRE=force {ssh_cmd}"
 
         for term in [
             "x-terminal-emulator",
@@ -626,9 +589,7 @@ def ensure_dockerfile_sync(workspace_dir: Path) -> Path:
             effective_content += f"\n{label_line}\n"
 
     try:
-        current = (
-            target_file.read_text(encoding="utf-8") if target_file.exists() else ""
-        )
+        current = target_file.read_text(encoding="utf-8") if target_file.exists() else ""
         if current.strip() != effective_content.strip():
             target_file.write_text(effective_content, encoding="utf-8")
     except Exception as e:
