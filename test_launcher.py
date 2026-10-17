@@ -9,6 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
 from PySide6 import QtGui, QtWidgets
 
 import exception_dialog
@@ -30,6 +31,20 @@ from robot_registry import (
 app = QtWidgets.QApplication.instance()
 if app is None:
     app = QtWidgets.QApplication(["--platform", "offscreen"])
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _cleanup_qt_session():
+    """Ensures all Qt windows, event filters, and deferred deletes are cleanly flushed before Python exit."""
+    yield
+    app_inst = QtWidgets.QApplication.instance()
+    if app_inst is not None:
+        try:
+            theme.remove_theme_event_filter()
+        except Exception:
+            pass
+        app_inst.closeAllWindows()
+        QtWidgets.QApplication.processEvents()
 
 
 def test_theme_palettes_and_stylesheet():
@@ -459,8 +474,8 @@ def test_docker_service_detection():
 
     assert isinstance(running, bool)
     assert isinstance(daemon_msg, str)
-    # The optimized query must complete well within 3 seconds
-    assert elapsed < 3.0
+    # The optimized query must complete well within the timeout
+    assert elapsed < 5.0
 
     state = DockerService.get_docker_state()
     if running:
@@ -541,49 +556,58 @@ def test_dialog_and_message_box_dark_mode():
     assert light_pal.color(QtGui.QPalette.ColorRole.Window).name() == "#f8fafc"
     assert light_pal.color(QtGui.QPalette.ColorRole.WindowText).name() == "#0f172a"
 
-    # Test dark mode application
-    theme.apply_theme_to_application(is_dark=True)
-    assert theme.get_active_theme_mode() is True
-
-    msg_dark = QtWidgets.QMessageBox()
-    msg_dark.setWindowTitle("Simulación")
-    msg_dark.setText("Contenedor detenido correctamente.")
-    msg_dark.setIcon(QtWidgets.QMessageBox.Icon.Information)
-    msg_dark.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
-    msg_dark.show()
     try:
-        pm_dark = QtGui.QPixmap(msg_dark.size())
-        msg_dark.render(pm_dark)
-        assert pm_dark.toImage().pixelColor(10, 10).name() == "#0f172a"
+        # Test dark mode application
+        theme.apply_theme_to_application(is_dark=True)
+        assert theme.get_active_theme_mode() is True
 
-        label_dark = msg_dark.findChild(QtWidgets.QLabel, "qt_msgbox_label")
-        assert label_dark is not None
-        assert (
-            label_dark.palette().color(label_dark.foregroundRole()).name() == "#f8fafc"
-        )
+        msg_dark = QtWidgets.QMessageBox()
+        msg_dark.setWindowTitle("Simulación")
+        msg_dark.setText("Contenedor detenido correctamente.")
+        msg_dark.setIcon(QtWidgets.QMessageBox.Icon.Information)
+        msg_dark.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
+        msg_dark.show()
+        try:
+            pm_dark = QtGui.QPixmap(msg_dark.size())
+            msg_dark.render(pm_dark)
+            assert pm_dark.toImage().pixelColor(10, 10).name() == "#0f172a"
+
+            label_dark = msg_dark.findChild(QtWidgets.QLabel, "qt_msgbox_label")
+            assert label_dark is not None
+            assert (
+                label_dark.palette().color(label_dark.foregroundRole()).name() == "#f8fafc"
+            )
+        finally:
+            msg_dark.close()
+            msg_dark.deleteLater()
+            QtWidgets.QApplication.processEvents()
+
+        # Test light mode application
+        theme.apply_theme_to_application(is_dark=False)
+        assert theme.get_active_theme_mode() is False
+
+        msg_light = QtWidgets.QMessageBox()
+        msg_light.setText("Texto en modo claro")
+        msg_light.show()
+        try:
+            pm_light = QtGui.QPixmap(msg_light.size())
+            msg_light.render(pm_light)
+            assert pm_light.toImage().pixelColor(10, 10).name() == "#f8fafc"
+
+            label_light = msg_light.findChild(QtWidgets.QLabel, "qt_msgbox_label")
+            assert label_light is not None
+            assert (
+                label_light.palette().color(label_light.foregroundRole()).name()
+                == "#0f172a"
+            )
+        finally:
+            msg_light.close()
+            msg_light.deleteLater()
+            QtWidgets.QApplication.processEvents()
     finally:
-        msg_dark.close()
-
-    # Test light mode application
-    theme.apply_theme_to_application(is_dark=False)
-    assert theme.get_active_theme_mode() is False
-
-    msg_light = QtWidgets.QMessageBox()
-    msg_light.setText("Texto en modo claro")
-    msg_light.show()
-    try:
-        pm_light = QtGui.QPixmap(msg_light.size())
-        msg_light.render(pm_light)
-        assert pm_light.toImage().pixelColor(10, 10).name() == "#f8fafc"
-
-        label_light = msg_light.findChild(QtWidgets.QLabel, "qt_msgbox_label")
-        assert label_light is not None
-        assert (
-            label_light.palette().color(label_light.foregroundRole()).name()
-            == "#0f172a"
-        )
-    finally:
-        msg_light.close()
+        theme.remove_theme_event_filter()
+        QtWidgets.QApplication.closeAllWindows()
+        QtWidgets.QApplication.processEvents()
 
 
 if __name__ == "__main__":

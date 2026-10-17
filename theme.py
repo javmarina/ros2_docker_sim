@@ -219,22 +219,37 @@ class _ThemeWindowEventFilter(QtCore.QObject):
     """Event filter that ensures all top-level windows and dialogs (e.g. QMessageBox)
     receive the Windows 10/11 DWM immersive dark mode attribute when shown."""
 
-    def __init__(self, is_dark: bool = False):
-        super().__init__()
+    def __init__(self, is_dark: bool = False, parent: QtCore.QObject | None = None):
+        super().__init__(parent)
         self.is_dark = is_dark
 
     def set_dark(self, is_dark: bool):
         self.is_dark = is_dark
 
     def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
-        if event.type() == QtCore.QEvent.Type.Show:
-            if obj.isWidgetType() and getattr(obj, "isWindow", lambda: False)():
-                set_window_dark_mode(obj, self.is_dark)
+        if (
+            event.type() == QtCore.QEvent.Type.Show
+            and obj.isWidgetType()
+            and getattr(obj, "isWindow", lambda: False)()
+        ):
+            set_window_dark_mode(obj, self.is_dark)
         return super().eventFilter(obj, event)
 
 
 _GLOBAL_WINDOW_FILTER: _ThemeWindowEventFilter | None = None
 _ACTIVE_THEME_DARK: bool | None = None
+
+
+def remove_theme_event_filter():
+    """Removes and cleans up the global window event filter from the QApplication."""
+    global _GLOBAL_WINDOW_FILTER
+    app = QtWidgets.QApplication.instance()
+    if app and _GLOBAL_WINDOW_FILTER is not None:
+        try:
+            app.removeEventFilter(_GLOBAL_WINDOW_FILTER)
+        except Exception:
+            pass
+        _GLOBAL_WINDOW_FILTER = None
 
 
 def get_active_theme_mode() -> bool:
@@ -317,8 +332,12 @@ def apply_theme_to_application(is_dark: bool, arrow_url: str = ""):
 
     # 3. Ensure global DWM window filter is installed and updated
     if _GLOBAL_WINDOW_FILTER is None:
-        _GLOBAL_WINDOW_FILTER = _ThemeWindowEventFilter(is_dark)
+        _GLOBAL_WINDOW_FILTER = _ThemeWindowEventFilter(is_dark, parent=app)
         app.installEventFilter(_GLOBAL_WINDOW_FILTER)
+        try:
+            app.aboutToQuit.connect(remove_theme_event_filter)
+        except Exception:
+            pass
     else:
         _GLOBAL_WINDOW_FILTER.set_dark(is_dark)
 
