@@ -19,8 +19,10 @@ import hashlib
 
 logger = logging.getLogger("docker_service")
 
+
 class DockerState(Enum):
     """Estados del ciclo de vida del servicio de Docker."""
+
     NOT_RUNNING = "NOT_RUNNING"
     STARTING = "STARTING"
     RUNNING = "RUNNING"
@@ -40,6 +42,7 @@ class DockerState(Enum):
 
 class ContainerState(Enum):
     """Estados del ciclo de vida del contenedor de simulación."""
+
     NOT_RUNNING = "NOT_RUNNING"
     STARTING = "STARTING"
     RUNNING = "RUNNING"
@@ -115,16 +118,38 @@ class DockerService:
         host_os = cls.get_host_os()
         if host_os == "windows":
             candidates_bin = [
-                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "DockerDesktop" / "resources" / "bin",
-                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Docker" / "resources" / "bin",
-                Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Docker" / "Docker" / "resources" / "bin",
+                Path(os.environ.get("LOCALAPPDATA", ""))
+                / "Programs"
+                / "DockerDesktop"
+                / "resources"
+                / "bin",
+                Path(os.environ.get("LOCALAPPDATA", ""))
+                / "Programs"
+                / "Docker"
+                / "resources"
+                / "bin",
+                Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+                / "Docker"
+                / "Docker"
+                / "resources"
+                / "bin",
                 Path(r"C:\Program Files\Docker\Docker\resources\bin"),
-                Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Docker" / "Docker" / "resources" / "bin",
-                Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "DockerDesktop" / "resources" / "bin",
+                Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+                / "Docker"
+                / "Docker"
+                / "resources"
+                / "bin",
+                Path(os.environ.get("ProgramData", r"C:\ProgramData"))
+                / "DockerDesktop"
+                / "resources"
+                / "bin",
             ]
             for p in candidates_bin:
                 if (p / "docker.exe").is_file():
-                    logger.info("Auto-detectada ruta bin de Docker en Windows: %s. Añadiendo a PATH.", p)
+                    logger.info(
+                        "Auto-detectada ruta bin de Docker en Windows: %s. Añadiendo a PATH.",
+                        p,
+                    )
                     os.environ["PATH"] = f"{p}{os.pathsep}{os.environ.get('PATH', '')}"
                     return
 
@@ -133,8 +158,13 @@ class DockerService:
             if desktop_exe:
                 fallback_bin = desktop_exe.parent / "resources" / "bin"
                 if (fallback_bin / "docker.exe").is_file():
-                    logger.info("Auto-detectada ruta bin de Docker desde Desktop.exe: %s. Añadiendo a PATH.", fallback_bin)
-                    os.environ["PATH"] = f"{fallback_bin}{os.pathsep}{os.environ.get('PATH', '')}"
+                    logger.info(
+                        "Auto-detectada ruta bin de Docker desde Desktop.exe: %s. Añadiendo a PATH.",
+                        fallback_bin,
+                    )
+                    os.environ["PATH"] = (
+                        f"{fallback_bin}{os.pathsep}{os.environ.get('PATH', '')}"
+                    )
                     return
 
         elif host_os == "mac":
@@ -161,7 +191,7 @@ class DockerService:
                 text=True,
                 check=False,
                 timeout=timeout,
-                creationflags=WIN32_NO_WINDOW
+                creationflags=WIN32_NO_WINDOW,
             )
             if res.returncode == 0:
                 return True, res.stdout.strip()
@@ -184,34 +214,46 @@ class DockerService:
             try:
                 import ctypes
                 from ctypes import wintypes
+
                 TH32CS_SNAPPROCESS = 0x00000002
+
                 class PROCESSENTRY32(ctypes.Structure):
                     _fields_ = [
-                        ('dwSize', wintypes.DWORD),
-                        ('cntUsage', wintypes.DWORD),
-                        ('th32ProcessID', wintypes.DWORD),
-                        ('th32DefaultHeapID', ctypes.c_void_p),
-                        ('th32ModuleID', wintypes.DWORD),
-                        ('cntThreads', wintypes.DWORD),
-                        ('th32ParentProcessID', wintypes.DWORD),
-                        ('pcPriClassBase', wintypes.LONG),
-                        ('dwFlags', wintypes.DWORD),
-                        ('szExeFile', ctypes.c_char * 260)
+                        ("dwSize", wintypes.DWORD),
+                        ("cntUsage", wintypes.DWORD),
+                        ("th32ProcessID", wintypes.DWORD),
+                        ("th32DefaultHeapID", ctypes.c_void_p),
+                        ("th32ModuleID", wintypes.DWORD),
+                        ("cntThreads", wintypes.DWORD),
+                        ("th32ParentProcessID", wintypes.DWORD),
+                        ("pcPriClassBase", wintypes.LONG),
+                        ("dwFlags", wintypes.DWORD),
+                        ("szExeFile", ctypes.c_char * 260),
                     ]
-                hSnap = ctypes.windll.kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+
+                hSnap = ctypes.windll.kernel32.CreateToolhelp32Snapshot(
+                    TH32CS_SNAPPROCESS, 0
+                )
                 if hSnap == -1 or not hSnap:
                     return True
                 pe = PROCESSENTRY32()
                 pe.dwSize = ctypes.sizeof(PROCESSENTRY32)
                 found = False
-                target_names = (b"docker desktop.exe", b"com.docker.backend.exe", b"com.docker.proxy.exe", b"dockerd.exe")
+                target_names = (
+                    b"docker desktop.exe",
+                    b"com.docker.backend.exe",
+                    b"com.docker.proxy.exe",
+                    b"dockerd.exe",
+                )
                 if ctypes.windll.kernel32.Process32First(hSnap, ctypes.byref(pe)):
                     while True:
                         name_lower = pe.szExeFile.lower()
                         if any(t in name_lower for t in target_names):
                             found = True
                             break
-                        if not ctypes.windll.kernel32.Process32Next(hSnap, ctypes.byref(pe)):
+                        if not ctypes.windll.kernel32.Process32Next(
+                            hSnap, ctypes.byref(pe)
+                        ):
                             break
                 ctypes.windll.kernel32.CloseHandle(hSnap)
                 return found
@@ -219,13 +261,23 @@ class DockerService:
                 return True
         elif host_os == "mac":
             try:
-                res = subprocess.run(["pgrep", "-i", "docker"], stdout=subprocess.PIPE, check=False, timeout=1.0)
+                res = subprocess.run(
+                    ["pgrep", "-i", "docker"],
+                    stdout=subprocess.PIPE,
+                    check=False,
+                    timeout=1.0,
+                )
                 return res.returncode == 0
             except Exception:
                 return True
         else:
             try:
-                res = subprocess.run(["pgrep", "-x", "dockerd"], stdout=subprocess.PIPE, check=False, timeout=1.0)
+                res = subprocess.run(
+                    ["pgrep", "-x", "dockerd"],
+                    stdout=subprocess.PIPE,
+                    check=False,
+                    timeout=1.0,
+                )
                 return res.returncode == 0
             except Exception:
                 return True
@@ -242,6 +294,7 @@ class DockerService:
             return True
         try:
             import ctypes
+
             res = ctypes.windll.kernel32.WaitNamedPipeW(r"\\.\pipe\docker_engine", 50)
             if res != 0:
                 return True
@@ -267,7 +320,10 @@ class DockerService:
 
         # 2. En Windows, si el proceso corre pero el Named Pipe no existe aún, el motor está arrancando (< 1ms)
         if not cls.is_docker_pipe_ready():
-            return DockerState.STARTING, "Docker Desktop se está iniciando (arrancando motor)..."
+            return (
+                DockerState.STARTING,
+                "Docker Desktop se está iniciando (arrancando motor)...",
+            )
 
         # 3. El Named Pipe existe: verificar si el daemon responde con la versión
         try:
@@ -278,7 +334,7 @@ class DockerService:
                 text=True,
                 check=False,
                 timeout=timeout,
-                creationflags=WIN32_NO_WINDOW
+                creationflags=WIN32_NO_WINDOW,
             )
             v = res.stdout.strip()
             if res.returncode == 0 and v and "<no value>" not in v:
@@ -296,8 +352,14 @@ class DockerService:
             return DockerState.NOT_RUNNING, err_msg
         except subprocess.TimeoutExpired:
             if cls.is_docker_desktop_process_running():
-                return DockerState.STARTING, "Docker Desktop se está iniciando (el motor aún no responde)..."
-            return DockerState.NOT_RUNNING, "Tiempo de espera agotado al conectar con el daemon de Docker."
+                return (
+                    DockerState.STARTING,
+                    "Docker Desktop se está iniciando (el motor aún no responde)...",
+                )
+            return (
+                DockerState.NOT_RUNNING,
+                "Tiempo de espera agotado al conectar con el daemon de Docker.",
+            )
         except Exception as e:
             return DockerState.NOT_RUNNING, str(e)
 
@@ -337,19 +399,35 @@ class DockerService:
         host_os = cls.get_host_os()
         if host_os == "windows":
             candidates = [
-                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "DockerDesktop" / "Docker Desktop.exe",
-                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Docker" / "Docker Desktop.exe",
-                Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Docker" / "Docker" / "Docker Desktop.exe",
+                Path(os.environ.get("LOCALAPPDATA", ""))
+                / "Programs"
+                / "DockerDesktop"
+                / "Docker Desktop.exe",
+                Path(os.environ.get("LOCALAPPDATA", ""))
+                / "Programs"
+                / "Docker"
+                / "Docker Desktop.exe",
+                Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+                / "Docker"
+                / "Docker"
+                / "Docker Desktop.exe",
                 Path(r"C:\Program Files\Docker\Docker\Docker Desktop.exe"),
-                Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Docker" / "Docker" / "Docker Desktop.exe",
-                Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "DockerDesktop" / "Docker Desktop.exe",
+                Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+                / "Docker"
+                / "Docker"
+                / "Docker Desktop.exe",
+                Path(os.environ.get("ProgramData", r"C:\ProgramData"))
+                / "DockerDesktop"
+                / "Docker Desktop.exe",
             ]
             for p in candidates:
                 if p.is_file():
                     return p
 
             # Buscar en PATH
-            which_p = shutil.which("Docker Desktop.exe") or shutil.which("Docker Desktop")
+            which_p = shutil.which("Docker Desktop.exe") or shutil.which(
+                "Docker Desktop"
+            )
             if which_p:
                 p = Path(which_p)
                 if p.is_file():
@@ -372,6 +450,7 @@ class DockerService:
         """Consulta directa en el registro de desinstalación de Windows."""
         try:
             import winreg
+
             sub_keys = [
                 r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop",
                 r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\DockerDesktop",
@@ -422,13 +501,19 @@ class DockerService:
                 logger.info("Comando de arranque de Docker Desktop enviado al sistema.")
                 return True, "Arrancando Docker Desktop en Windows..."
             except Exception as e:
-                logger.warning("Fallo al iniciar con startfile, intentando con Popen: %s", e)
+                logger.warning(
+                    "Fallo al iniciar con startfile, intentando con Popen: %s", e
+                )
                 try:
                     subprocess.Popen([str(exe_path)], close_fds=True)
-                    logger.info("Comando de arranque de Docker Desktop enviado vía Popen.")
+                    logger.info(
+                        "Comando de arranque de Docker Desktop enviado vía Popen."
+                    )
                     return True, "Arrancando Docker Desktop en Windows..."
                 except Exception as e2:
-                    logger.error("Error al arrancar Docker Desktop: %s", e2, exc_info=True)
+                    logger.error(
+                        "Error al arrancar Docker Desktop: %s", e2, exc_info=True
+                    )
                     return False, f"No se pudo arrancar Docker Desktop: {e2}"
 
         elif host_os == "mac":
@@ -446,9 +531,10 @@ class DockerService:
             except Exception as e:
                 return False, f"Error al iniciar servicio Docker en Linux: {e}"
 
-
     @staticmethod
-    def is_container_running(container_name: str = DEFAULT_CONTAINER_NAME, timeout: float = 3.0) -> bool:
+    def is_container_running(
+        container_name: str = DEFAULT_CONTAINER_NAME, timeout: float = 3.0
+    ) -> bool:
         """Verifica si el contenedor especificado está actualmente en ejecución."""
         try:
             res = subprocess.run(
@@ -458,19 +544,27 @@ class DockerService:
                 text=True,
                 check=False,
                 timeout=timeout,
-                creationflags=WIN32_NO_WINDOW
+                creationflags=WIN32_NO_WINDOW,
             )
             return bool(res.stdout.strip())
         except Exception:
             return False
 
     @classmethod
-    def get_container_state(cls, container_name: str = DEFAULT_CONTAINER_NAME, timeout: float = 3.0) -> ContainerState:
+    def get_container_state(
+        cls, container_name: str = DEFAULT_CONTAINER_NAME, timeout: float = 3.0
+    ) -> ContainerState:
         """Determina el estado actual del contenedor como ContainerState enum."""
-        return ContainerState.RUNNING if cls.is_container_running(container_name, timeout=timeout) else ContainerState.NOT_RUNNING
+        return (
+            ContainerState.RUNNING
+            if cls.is_container_running(container_name, timeout=timeout)
+            else ContainerState.NOT_RUNNING
+        )
 
     @staticmethod
-    def is_image_available(image_name: str = COURSE_IMAGE_NAME, timeout: float = 5.0) -> bool:
+    def is_image_available(
+        image_name: str = COURSE_IMAGE_NAME, timeout: float = 5.0
+    ) -> bool:
         """Verifica si la imagen existe localmente en Docker."""
         try:
             res = subprocess.run(
@@ -480,7 +574,7 @@ class DockerService:
                 text=True,
                 check=False,
                 timeout=timeout,
-                creationflags=WIN32_NO_WINDOW
+                creationflags=WIN32_NO_WINDOW,
             )
             return res.returncode == 0
         except Exception:
@@ -496,20 +590,28 @@ class DockerService:
         normalized_lines = []
         for line in content.splitlines():
             line = line.strip()
-            if not line or line.startswith("#") or line.startswith(f"LABEL {DOCKERFILE_HASH_LABEL}"):
+            if (
+                not line
+                or line.startswith("#")
+                or line.startswith(f"LABEL {DOCKERFILE_HASH_LABEL}")
+            ):
                 continue
             normalized_lines.append(line)
         normalized_text = "\n".join(normalized_lines)
         return hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()[:16]
 
     @staticmethod
-    def get_image_label(image_name: str, label_name: str, timeout: float = 5.0) -> Optional[str]:
+    def get_image_label(
+        image_name: str, label_name: str, timeout: float = 5.0
+    ) -> Optional[str]:
         """Obtiene el valor de una etiqueta de metadatos de una imagen Docker."""
         try:
             cmd = [
-                "docker", "inspect",
-                "--format", f'{{{{index .Config.Labels "{label_name}"}}}}',
-                image_name
+                "docker",
+                "inspect",
+                "--format",
+                f'{{{{index .Config.Labels "{label_name}"}}}}',
+                image_name,
             ]
             result = subprocess.run(
                 cmd,
@@ -517,7 +619,7 @@ class DockerService:
                 text=True,
                 check=False,
                 timeout=timeout,
-                creationflags=WIN32_NO_WINDOW
+                creationflags=WIN32_NO_WINDOW,
             )
             if result.returncode == 0:
                 val = result.stdout.strip()
@@ -532,7 +634,7 @@ class DockerService:
         cls,
         image_name: str = COURSE_IMAGE_NAME,
         expected_hash: str = "",
-        fallback_hash: Optional[str] = None
+        fallback_hash: Optional[str] = None,
     ) -> bool:
         """
         Verifica si la imagen Docker local existe y contiene todas las capas esperadas.
@@ -552,12 +654,13 @@ class DockerService:
         # Fallback a hash persistido en la configuración local
         if fallback_hash and fallback_hash == expected_hash:
             return True
-            
 
         return False
 
     @staticmethod
-    def stop_container(container_name: str = DEFAULT_CONTAINER_NAME, timeout: float = 15.0) -> Tuple[bool, str]:
+    def stop_container(
+        container_name: str = DEFAULT_CONTAINER_NAME, timeout: float = 15.0
+    ) -> Tuple[bool, str]:
         """Detiene y elimina de forma inmediata el contenedor para evitar bloqueos."""
         logger.info("Deteniendo contenedor '%s'...", container_name)
         try:
@@ -568,7 +671,7 @@ class DockerService:
                 text=True,
                 check=False,
                 timeout=timeout,
-                creationflags=WIN32_NO_WINDOW
+                creationflags=WIN32_NO_WINDOW,
             )
             if res.returncode == 0:
                 logger.debug("Contenedor '%s' detenido y eliminado.", container_name)
@@ -576,7 +679,9 @@ class DockerService:
             logger.debug("No había contenedor '%s' activo.", container_name)
             return True, "No había contenedor activo para detener."
         except Exception as e:
-            logger.error("Error al detener contenedor '%s': %s", container_name, e, exc_info=True)
+            logger.error(
+                "Error al detener contenedor '%s': %s", container_name, e, exc_info=True
+            )
             return False, str(e)
 
     @staticmethod
@@ -584,7 +689,11 @@ class DockerService:
         """Elimina los volúmenes persistentes de caché de compilación de colcon."""
         logger.info("Eliminando volúmenes de caché ros2_jazzy_*...")
         try:
-            volumes = ["ros2_jazzy_build_cache", "ros2_jazzy_install_cache", "ros2_jazzy_log_cache"]
+            volumes = [
+                "ros2_jazzy_build_cache",
+                "ros2_jazzy_install_cache",
+                "ros2_jazzy_log_cache",
+            ]
             for v in volumes:
                 subprocess.run(
                     ["docker", "volume", "rm", "-f", v],
@@ -592,7 +701,7 @@ class DockerService:
                     stderr=subprocess.PIPE,
                     check=False,
                     timeout=timeout,
-                    creationflags=WIN32_NO_WINDOW
+                    creationflags=WIN32_NO_WINDOW,
                 )
             logger.debug("Volúmenes de caché eliminados.")
             return True, "Caché de compilación eliminada correctamente."
@@ -601,16 +710,28 @@ class DockerService:
             return False, str(e)
 
     @classmethod
-    def open_container_terminal(cls, container_name: str = DEFAULT_CONTAINER_NAME) -> Tuple[bool, str]:
+    def open_container_terminal(
+        cls, container_name: str = DEFAULT_CONTAINER_NAME
+    ) -> Tuple[bool, str]:
         """
         Abre una terminal interactiva nativa conectada al contenedor con el entorno ROS 2 ya cargado.
         """
-        logger.info("[Terminal] Solicitud recibida para abrir terminal interactiva en contenedor '%s'", container_name)
+        logger.info(
+            "[Terminal] Solicitud recibida para abrir terminal interactiva en contenedor '%s'",
+            container_name,
+        )
         running = cls.is_container_running(container_name)
-        logger.info("[Terminal] Estado del contenedor '%s': running=%s", container_name, running)
+        logger.info(
+            "[Terminal] Estado del contenedor '%s': running=%s", container_name, running
+        )
         if not running:
-            logger.warning("[Terminal] Contenedor '%s' no está corriendo", container_name)
-            return False, f"El contenedor '{container_name}' no está en ejecución. Inicia la simulación primero."
+            logger.warning(
+                "[Terminal] Contenedor '%s' no está corriendo", container_name
+            )
+            return (
+                False,
+                f"El contenedor '{container_name}' no está en ejecución. Inicia la simulación primero.",
+            )
 
         host_os = cls.get_host_os()
         logger.info("[Terminal] Sistema operativo detectado: %s", host_os)
@@ -643,25 +764,45 @@ class DockerService:
 
             else:
                 # Linux: intentar emuladores de terminal comunes
-                for term in ["x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"]:
+                for term in [
+                    "x-terminal-emulator",
+                    "gnome-terminal",
+                    "konsole",
+                    "xfce4-terminal",
+                    "xterm",
+                ]:
                     term_path = shutil.which(term)
                     if term_path:
-                        logger.info("[Terminal] Emulador Linux encontrado: %s", term_path)
-                        proc = subprocess.Popen([
-                            term_path, "-e",
-                            f'docker exec -it {container_name} bash -c "{bash_init}"'
-                        ])
+                        logger.info(
+                            "[Terminal] Emulador Linux encontrado: %s", term_path
+                        )
+                        proc = subprocess.Popen(
+                            [
+                                term_path,
+                                "-e",
+                                f'docker exec -it {container_name} bash -c "{bash_init}"',
+                            ]
+                        )
                         logger.info("[Terminal] Terminal lanzada con PID: %s", proc.pid)
                         return True, f"Terminal abierta en {term}."
-                logger.error("[Terminal] No se encontró ningún emulador de terminal compatible en Linux")
-                return False, "No se encontró ningún emulador de terminal compatible en el sistema."
+                logger.error(
+                    "[Terminal] No se encontró ningún emulador de terminal compatible en Linux"
+                )
+                return (
+                    False,
+                    "No se encontró ningún emulador de terminal compatible en el sistema.",
+                )
 
         except Exception as e:
-            logger.exception("[Terminal] Excepción al intentar abrir la terminal: %s", e)
+            logger.exception(
+                "[Terminal] Excepción al intentar abrir la terminal: %s", e
+            )
             return False, f"Error al abrir la terminal: {str(e)}"
 
     @classmethod
-    def get_container_exec_args(cls, container_name: str, command_str: str) -> List[str]:
+    def get_container_exec_args(
+        cls, container_name: str, command_str: str
+    ) -> List[str]:
         """
         Construye la lista de argumentos para ejecutar un comando dentro del contenedor
         cargando de forma segura el entorno de ROS 2 y el workspace.
@@ -671,17 +812,11 @@ class DockerService:
             "test ! -f /ros2_ws/install/setup.bash || source /ros2_ws/install/setup.bash; "
             f"{command_str}"
         )
-        return [
-            "docker", "exec", container_name,
-            "/bin/bash", "-c", full_cmd
-        ]
+        return ["docker", "exec", container_name, "/bin/bash", "-c", full_cmd]
 
     @classmethod
     def execute_in_container_stream(
-        cls,
-        container_name: str,
-        command_str: str,
-        log_cb: Callable[[str], None]
+        cls, container_name: str, command_str: str, log_cb: Callable[[str], None]
     ) -> Optional[subprocess.Popen]:
         """
         Ejecuta un comando no interactivo dentro del contenedor y transmite su salida.
@@ -699,7 +834,7 @@ class DockerService:
                 errors="replace",
                 bufsize=1,
                 universal_newlines=True,
-                creationflags=WIN32_NO_WINDOW
+                creationflags=WIN32_NO_WINDOW,
             )
             return proc
         except Exception as e:
@@ -715,32 +850,51 @@ class DockerService:
         domain_id: str,
         robot_model: str,
         ws_path: str,
-        web_port: str = "6080"
+        web_port: str = "6080",
     ) -> List[str]:
         """
         Construye la lista de argumentos para ejecutar el contenedor de simulación
         garantizando un montaje de volúmenes seguro en Windows y variables de visualización virtual.
         """
         docker_cmd = [
-            "docker", "run", "--rm",
-            "--name", container_name,
-            "-p", f"{web_port}:6080",
+            "docker",
+            "run",
+            "--rm",
+            "--name",
+            container_name,
+            "-p",
+            f"{web_port}:6080",
             "--ipc=host",
-            "-e", f"ROS_DOMAIN_ID={domain_id}",
-            "-e", f"ROBOT_MODEL={robot_model}",
-            "-e", "RCUTILS_COLORIZED_OUTPUT=1",
-            "-e", "PYTHONUNBUFFERED=1",
-            "-e", "DISPLAY=:99",
-            "-e", "QT_X11_NO_MITSHM=1",
-            "-e", "LIBGL_ALWAYS_SOFTWARE=1",
-            "-e", "MESA_GL_VERSION_OVERRIDE=3.3",
-            "-e", "GALLIUM_DRIVER=llvmpipe",
-            "-e", "QT_QPA_PLATFORM=xcb",
-            "-e", "OGRE_RTT_MODE=Copy",
-            "-v", "ros2_jazzy_gz_cache:/root/.gz",
-            "-v", "ros2_jazzy_build_cache:/ros2_ws/build",
-            "-v", "ros2_jazzy_install_cache:/ros2_ws/install",
-            "-v", "ros2_jazzy_log_cache:/ros2_ws/log",
+            "-e",
+            f"ROS_DOMAIN_ID={domain_id}",
+            "-e",
+            f"ROBOT_MODEL={robot_model}",
+            "-e",
+            "RCUTILS_COLORIZED_OUTPUT=1",
+            "-e",
+            "PYTHONUNBUFFERED=1",
+            "-e",
+            "DISPLAY=:99",
+            "-e",
+            "QT_X11_NO_MITSHM=1",
+            "-e",
+            "LIBGL_ALWAYS_SOFTWARE=1",
+            "-e",
+            "MESA_GL_VERSION_OVERRIDE=3.3",
+            "-e",
+            "GALLIUM_DRIVER=llvmpipe",
+            "-e",
+            "QT_QPA_PLATFORM=xcb",
+            "-e",
+            "OGRE_RTT_MODE=Copy",
+            "-v",
+            "ros2_jazzy_gz_cache:/root/.gz",
+            "-v",
+            "ros2_jazzy_build_cache:/ros2_ws/build",
+            "-v",
+            "ros2_jazzy_install_cache:/ros2_ws/install",
+            "-v",
+            "ros2_jazzy_log_cache:/ros2_ws/log",
         ]
 
         # Montaje seguro del espacio de trabajo
@@ -768,7 +922,7 @@ class DockerService:
     def pull_image_stream(
         image_name: str,
         progress_cb: Callable[[float, str], None],
-        log_cb: Callable[[str], None]
+        log_cb: Callable[[str], None],
     ) -> Tuple[bool, str]:
         """Descarga una imagen de Docker analizando el progreso capa a capa."""
         cmd = ["docker", "pull", image_name]
@@ -785,10 +939,10 @@ class DockerService:
                 errors="replace",
                 bufsize=1,
                 universal_newlines=True,
-                creationflags=WIN32_NO_WINDOW
+                creationflags=WIN32_NO_WINDOW,
             )
 
-            for line in iter(process.stdout.readline, ''):
+            for line in iter(process.stdout.readline, ""):
                 clean_line = line.strip()
                 if clean_line:
                     log_cb(clean_line + "\n")
@@ -796,25 +950,33 @@ class DockerService:
                 match = re.match(
                     r"^([a-f0-9]+):\s+([^\[]+)(?:\[.*?\]\s*([0-9\.]+)(?:kB|MB|GB)?/([0-9\.]+)(?:kB|MB|GB)?)?",
                     clean_line,
-                    re.IGNORECASE
+                    re.IGNORECASE,
                 )
                 if match:
                     layer_id, status, cur_str, tot_str = match.groups()
                     status = status.strip()
-                    if "complete" in status.lower() or "already exists" in status.lower():
+                    if (
+                        "complete" in status.lower()
+                        or "already exists" in status.lower()
+                    ):
                         layers[layer_id] = 100.0
                     elif cur_str and tot_str:
                         try:
                             cur_val = float(cur_str)
                             tot_val = float(tot_str)
                             if tot_val > 0:
-                                layers[layer_id] = min(99.0, (cur_val / tot_val) * 100.0)
+                                layers[layer_id] = min(
+                                    99.0, (cur_val / tot_val) * 100.0
+                                )
                         except ValueError:
                             pass
 
                 if layers:
                     avg_progress = sum(layers.values()) / max(1, len(layers))
-                    progress_cb(avg_progress, f"Descargando {image_name}... ({avg_progress:.1f}%)")
+                    progress_cb(
+                        avg_progress,
+                        f"Descargando {image_name}... ({avg_progress:.1f}%)",
+                    )
                 else:
                     progress_cb(-1, f"Descargando {image_name}...")
 
@@ -835,11 +997,11 @@ class DockerService:
         tag_name: str,
         progress_cb: Callable[[float, str], None],
         log_cb: Callable[[str], None],
-        labels: Optional[Dict[str, str]] = None
+        labels: Optional[Dict[str, str]] = None,
     ) -> Tuple[bool, str]:
         """Construye una imagen Docker a partir de un Dockerfile con estimación de progreso y caché inteligente."""
         cmd = ["docker", "build", "--progress=plain", "-t", tag_name]
-        
+
         # Nota: Docker BuildKit aprovecha automáticamente la caché de capas local existente para la imagen.
         if labels:
             for k, v in labels.items():
@@ -873,10 +1035,10 @@ class DockerService:
                 errors="replace",
                 bufsize=1,
                 universal_newlines=True,
-                creationflags=WIN32_NO_WINDOW
+                creationflags=WIN32_NO_WINDOW,
             )
 
-            for line in iter(process.stdout.readline, ''):
+            for line in iter(process.stdout.readline, ""):
                 clean_line = line.strip()
                 if clean_line:
                     safe_log(clean_line + "\n")
@@ -886,25 +1048,45 @@ class DockerService:
                     current_step = int(step_match.group(1))
                     total_steps = int(step_match.group(2))
                     pct = (current_step / total_steps) * 100.0
-                    safe_progress(pct, f"Construyendo imagen - Paso {current_step}/{total_steps}...")
+                    safe_progress(
+                        pct,
+                        f"Construyendo imagen - Paso {current_step}/{total_steps}...",
+                    )
                 elif clean_line.startswith("#"):
                     bk_match = re.search(r"\[(\d+)/(\d+)\]", clean_line)
                     if bk_match:
                         current_step = int(bk_match.group(1))
                         total_steps = int(bk_match.group(2))
                         pct = (current_step / total_steps) * 100.0
-                        safe_progress(pct, f"BuildKit - Paso {current_step}/{total_steps}...")
+                        safe_progress(
+                            pct, f"BuildKit - Paso {current_step}/{total_steps}..."
+                        )
                     elif current_step > 0:
                         pct = (current_step / total_steps) * 100.0
                         if "===" in clean_line:
-                            stage = clean_line.split("===")[1].strip() if len(clean_line.split("===")) > 1 else clean_line
-                            safe_progress(pct, f"Paso {current_step}/{total_steps} - {stage}")
-                        elif any(k in clean_line for k in ("Unpacking", "Setting up", "Preparing to unpack")):
+                            stage = (
+                                clean_line.split("===")[1].strip()
+                                if len(clean_line.split("===")) > 1
+                                else clean_line
+                            )
+                            safe_progress(
+                                pct, f"Paso {current_step}/{total_steps} - {stage}"
+                            )
+                        elif any(
+                            k in clean_line
+                            for k in ("Unpacking", "Setting up", "Preparing to unpack")
+                        ):
                             tokens = clean_line.split()
                             pkg = tokens[-1].strip("().") if tokens else ""
-                            safe_progress(pct, f"Paso {current_step}/{total_steps} - Instalando: {pkg}")
+                            safe_progress(
+                                pct,
+                                f"Paso {current_step}/{total_steps} - Instalando: {pkg}",
+                            )
                         elif "Get:" in clean_line or "Fetch" in clean_line:
-                            safe_progress(pct, f"Paso {current_step}/{total_steps} - Descargando paquetes...")
+                            safe_progress(
+                                pct,
+                                f"Paso {current_step}/{total_steps} - Descargando paquetes...",
+                            )
 
             process.stdout.close()
             return_code = process.wait()
@@ -920,4 +1102,3 @@ class DockerService:
 
 # Inicialización: verificar e inyectar Docker en el PATH si está instalado en rutas estándar
 DockerService.ensure_docker_in_path()
-

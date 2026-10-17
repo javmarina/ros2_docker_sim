@@ -175,6 +175,7 @@ THEME_PALETTES["dark"].update(_DARK_ALIASES)
 # OS Dark Mode & Windows DWM Integration
 # ---------------------------------------------------------------------------
 
+
 def is_dark_mode() -> bool:
     """Determines if the OS is currently in Dark Mode via Qt style hints."""
     app = QtWidgets.QApplication.instance()
@@ -201,11 +202,16 @@ def set_window_dark_mode(target: Union[QtWidgets.QWidget, int], dark: bool):
         else:
             hwnd = int(target)
         import ctypes
+
         val = ctypes.c_int(1 if dark else 0)
         # DWMWA_USE_IMMERSIVE_DARK_MODE: 20 on Win11/Win10 20H1+, 19 on earlier builds
-        res = ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(val), ctypes.sizeof(val))
+        res = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 20, ctypes.byref(val), ctypes.sizeof(val)
+        )
         if res != 0:
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(val), ctypes.sizeof(val))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 19, ctypes.byref(val), ctypes.sizeof(val)
+            )
     except Exception as e:
         logger.debug("No se pudo configurar DWM immersive dark mode: %s", e)
 
@@ -271,10 +277,22 @@ def create_theme_palette(is_dark: bool) -> QtGui.QPalette:
     palette.setColor(QtGui.QPalette.ColorRole.PlaceholderText, disabled_text)
 
     # Disabled
-    palette.setColor(QtGui.QPalette.ColorGroup.Disabled, QtGui.QPalette.ColorRole.WindowText, disabled_text)
-    palette.setColor(QtGui.QPalette.ColorGroup.Disabled, QtGui.QPalette.ColorRole.Text, disabled_text)
-    palette.setColor(QtGui.QPalette.ColorGroup.Disabled, QtGui.QPalette.ColorRole.ButtonText, disabled_text)
-    palette.setColor(QtGui.QPalette.ColorGroup.Disabled, QtGui.QPalette.ColorRole.Button, disabled_bg)
+    palette.setColor(
+        QtGui.QPalette.ColorGroup.Disabled,
+        QtGui.QPalette.ColorRole.WindowText,
+        disabled_text,
+    )
+    palette.setColor(
+        QtGui.QPalette.ColorGroup.Disabled, QtGui.QPalette.ColorRole.Text, disabled_text
+    )
+    palette.setColor(
+        QtGui.QPalette.ColorGroup.Disabled,
+        QtGui.QPalette.ColorRole.ButtonText,
+        disabled_text,
+    )
+    palette.setColor(
+        QtGui.QPalette.ColorGroup.Disabled, QtGui.QPalette.ColorRole.Button, disabled_bg
+    )
 
     return palette
 
@@ -315,6 +333,7 @@ def apply_theme_to_application(is_dark: bool, arrow_url: str = ""):
 # Reusable Badge & Label Styling Helpers
 # ---------------------------------------------------------------------------
 
+
 def style_badge(label: QtWidgets.QLabel, text: str, kind: str, is_dark: bool = False):
     """Applies consistent styling to status badges using centralized semantic colors."""
     label.setText(text)
@@ -329,7 +348,9 @@ def style_badge(label: QtWidgets.QLabel, text: str, kind: str, is_dark: bool = F
     """)
 
 
-def style_status_label(label: QtWidgets.QLabel, text: str, kind: str, is_dark: bool = False):
+def style_status_label(
+    label: QtWidgets.QLabel, text: str, kind: str, is_dark: bool = False
+):
     """Applies accessible text color to status labels using centralized semantic colors."""
     label.setText(text)
     fg, _, _ = get_status_colors(kind, is_dark)
@@ -340,6 +361,7 @@ def style_status_label(label: QtWidgets.QLabel, text: str, kind: str, is_dark: b
 # ---------------------------------------------------------------------------
 # Dialog Stylesheet Generator (Exception, Updater, and generic Modal Dialogs)
 # ---------------------------------------------------------------------------
+
 
 def build_dialog_stylesheet(is_dark: bool, dialog_type: str = "default") -> str:
     """
@@ -354,62 +376,62 @@ def build_dialog_stylesheet(is_dark: bool, dialog_type: str = "default") -> str:
 
     base_css = f"""
         QDialog, QMessageBox {{
-            background-color: {p['bg_window']};
-            color: {p['text_primary']};
+            background-color: {p["bg_window"]};
+            color: {p["text_primary"]};
             font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
         }}
         QLabel {{
-            color: {p['text_primary']};
+            color: {p["text_primary"]};
         }}
         QMessageBox QLabel, QDialog QLabel {{
-            color: {p['text_primary']};
+            color: {p["text_primary"]};
             background-color: transparent;
         }}
         QMessageBox QLabel#qt_msgbox_label {{
             font-size: 13px;
             font-weight: 500;
-            color: {p['text_primary']};
+            color: {p["text_primary"]};
             line-height: 1.4;
             background-color: transparent;
         }}
         QMessageBox QLabel#qt_msgbox_informativelabel {{
             font-size: 12px;
-            color: {p['text_secondary']};
+            color: {p["text_secondary"]};
             background-color: transparent;
         }}
         QMessageBox QLabel#qt_msgboxex_icon_label {{
             background-color: transparent;
         }}
         QMessageBox QPushButton, QDialog QPushButton {{
-            background-color: {p['bg_button']};
-            border: 1px solid {p['border_input']};
+            background-color: {p["bg_button"]};
+            border: 1px solid {p["border_input"]};
             border-radius: 6px;
             padding: 6px 18px;
             min-width: 68px;
             min-height: 20px;
             font-size: 12px;
             font-weight: 600;
-            color: {p['text_primary']};
+            color: {p["text_primary"]};
         }}
         QMessageBox QPushButton:hover, QDialog QPushButton:hover {{
-            background-color: {p['bg_button_hover']};
-            border-color: {p['border_input_hover']};
+            background-color: {p["bg_button_hover"]};
+            border-color: {p["border_input_hover"]};
         }}
         QMessageBox QPushButton:pressed, QDialog QPushButton:pressed {{
-            background-color: {p['bg_button_pressed']};
+            background-color: {p["bg_button_pressed"]};
         }}
         QMessageBox QPushButton:focus, QDialog QPushButton:focus {{
-            border: 1px solid {p['border_focus']};
+            border: 1px solid {p["border_focus"]};
         }}
         QMessageBox QPushButton:default, QDialog QPushButton:default {{
-            background-color: {p['primary']};
+            background-color: {p["primary"]};
             color: #ffffff;
-            border: 1px solid {p['primary']};
+            border: 1px solid {p["primary"]};
             font-weight: 700;
         }}
         QMessageBox QPushButton:default:hover, QDialog QPushButton:default:hover {{
-            background-color: {p['primary_hover']};
-            border-color: {p['primary_hover']};
+            background-color: {p["primary_hover"]};
+            border-color: {p["primary_hover"]};
         }}
         QMessageBox QDialogButtonBox {{
             background-color: transparent;
@@ -417,9 +439,9 @@ def build_dialog_stylesheet(is_dark: bool, dialog_type: str = "default") -> str:
         }}
         QMessageBox QTextEdit, QMessageBox QPlainTextEdit,
         QDialog QTextEdit, QDialog QPlainTextEdit {{
-            background-color: {p['bg_input']};
-            color: {p['text_primary']};
-            border: 1px solid {p['border_input']};
+            background-color: {p["bg_input"]};
+            color: {p["text_primary"]};
+            border: 1px solid {p["border_input"]};
             border-radius: 6px;
         }}
     """
@@ -427,10 +449,12 @@ def build_dialog_stylesheet(is_dark: bool, dialog_type: str = "default") -> str:
     if dialog_type == "exception":
         report_bg = "#020617" if is_dark else "#ffffff"
         report_fg = "#94a3b8" if is_dark else "#334155"
-        return base_css + f"""
+        return (
+            base_css
+            + f"""
             #errHeaderFrame {{
-                background-color: {p['bg_card']};
-                border: 1px solid {p['border']};
+                background-color: {p["bg_card"]};
+                border: 1px solid {p["border"]};
                 border-left: 5px solid {error_fg};
                 border-radius: 8px;
             }}
@@ -441,11 +465,11 @@ def build_dialog_stylesheet(is_dark: bool, dialog_type: str = "default") -> str:
             }}
             #errSummary {{
                 font-size: 12px;
-                color: {p['text_primary']};
+                color: {p["text_primary"]};
             }}
             #errInstruction {{
                 font-size: 11px;
-                color: {p['text_muted']};
+                color: {p["text_muted"]};
                 margin-top: 2px;
             }}
             #errReportText {{
@@ -453,24 +477,24 @@ def build_dialog_stylesheet(is_dark: bool, dialog_type: str = "default") -> str:
                 color: {report_fg};
                 font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
                 font-size: 11px;
-                border: 1px solid {p['border']};
+                border: 1px solid {p["border"]};
                 border-radius: 6px;
                 padding: 10px;
             }}
             #btnCopyReport {{
-                background-color: {p['bg_button']};
-                color: {p['text_primary']};
-                border: 1px solid {p['border_input']};
+                background-color: {p["bg_button"]};
+                color: {p["text_primary"]};
+                border: 1px solid {p["border_input"]};
                 border-radius: 6px;
                 padding: 7px 14px;
                 font-weight: 600;
                 font-size: 12px;
             }}
             #btnCopyReport:hover {{
-                background-color: {p['bg_button_hover']};
+                background-color: {p["bg_button_hover"]};
             }}
             #btnEmailReport {{
-                background-color: {p['danger']};
+                background-color: {p["danger"]};
                 color: #ffffff;
                 border: none;
                 border-radius: 6px;
@@ -479,19 +503,19 @@ def build_dialog_stylesheet(is_dark: bool, dialog_type: str = "default") -> str:
                 font-size: 12px;
             }}
             #btnEmailReport:hover {{
-                background-color: {p['danger_hover']};
+                background-color: {p["danger_hover"]};
             }}
             #btnClose {{
                 background-color: transparent;
-                color: {p['text_muted']};
-                border: 1px solid {p['border']};
+                color: {p["text_muted"]};
+                border: 1px solid {p["border"]};
                 border-radius: 6px;
                 padding: 7px 16px;
                 font-size: 12px;
             }}
             #btnClose:hover {{
-                background-color: {p['bg_button']};
-                color: {p['text_primary']};
+                background-color: {p["bg_button"]};
+                color: {p["text_primary"]};
             }}
             #errFeedback {{
                 font-size: 11px;
@@ -499,12 +523,15 @@ def build_dialog_stylesheet(is_dark: bool, dialog_type: str = "default") -> str:
                 font-weight: 600;
             }}
         """
+        )
 
     elif dialog_type == "updater":
-        return base_css + f"""
+        return (
+            base_css
+            + f"""
             #headerCard {{
-                background-color: {p['bg_card']};
-                border: 1px solid {p['border']};
+                background-color: {p["bg_card"]};
+                border: 1px solid {p["border"]};
                 border-radius: 8px;
             }}
             #badgeLabel {{
@@ -516,60 +543,60 @@ def build_dialog_stylesheet(is_dark: bool, dialog_type: str = "default") -> str:
                 border-radius: 6px;
             }}
             #currentLabel {{
-                color: {p['text_secondary']};
+                color: {p["text_secondary"]};
                 font-size: 12px;
                 margin-left: 6px;
             }}
             #dateLabel {{
-                color: {p['text_muted']};
+                color: {p["text_muted"]};
                 font-size: 11px;
             }}
             #lblNotes {{
                 font-size: 13px;
                 font-weight: 600;
-                color: {p['text_primary']};
+                color: {p["text_primary"]};
             }}
             #changelogBox {{
-                background-color: {p['bg_card']};
-                border: 1px solid {p['border_input']};
+                background-color: {p["bg_card"]};
+                border: 1px solid {p["border_input"]};
                 border-radius: 6px;
                 padding: 10px;
-                color: {p['text_primary']};
+                color: {p["text_primary"]};
                 font-size: 12px;
                 line-height: 1.4;
             }}
             #progressBar {{
-                border: 1px solid {p['border_input']};
+                border: 1px solid {p["border_input"]};
                 border-radius: 6px;
                 text-align: center;
-                background-color: {p['bg_input']};
+                background-color: {p["bg_input"]};
                 height: 20px;
                 font-size: 11px;
                 font-weight: 600;
-                color: {p['text_primary']};
+                color: {p["text_primary"]};
             }}
             #progressBar::chunk {{
-                background-color: {p['success']};
+                background-color: {p["success"]};
                 border-radius: 5px;
             }}
             #statusLabel {{
-                color: {p['text_secondary']};
+                color: {p["text_secondary"]};
                 font-size: 12px;
             }}
             #btnLater {{
-                background-color: {p['bg_button']};
-                color: {p['text_primary']};
-                border: 1px solid {p['border_input']};
+                background-color: {p["bg_button"]};
+                color: {p["text_primary"]};
+                border: 1px solid {p["border_input"]};
                 border-radius: 6px;
                 padding: 8px 16px;
                 font-size: 12px;
                 font-weight: 600;
             }}
             #btnLater:hover {{
-                background-color: {p['bg_button_hover']};
+                background-color: {p["bg_button_hover"]};
             }}
             #btnUpdate {{
-                background-color: {p['success']};
+                background-color: {p["success"]};
                 color: #ffffff;
                 border: none;
                 border-radius: 6px;
@@ -578,12 +605,13 @@ def build_dialog_stylesheet(is_dark: bool, dialog_type: str = "default") -> str:
                 font-weight: 700;
             }}
             #btnUpdate:hover {{
-                background-color: {p['success_hover']};
+                background-color: {p["success_hover"]};
             }}
             #btnUpdate:disabled {{
-                background-color: {p['text_muted']};
+                background-color: {p["text_muted"]};
             }}
         """
+        )
 
     return base_css
 
@@ -592,6 +620,7 @@ def build_dialog_stylesheet(is_dark: bool, dialog_type: str = "default") -> str:
 # Global Application Stylesheet Generator
 # ---------------------------------------------------------------------------
 
+
 def build_global_stylesheet(is_dark: bool, arrow_url: str = "") -> str:
     """Generates the complete QSS stylesheet for the application based on the active theme."""
     p = THEME_PALETTES["dark" if is_dark else "light"]
@@ -599,68 +628,68 @@ def build_global_stylesheet(is_dark: bool, arrow_url: str = "") -> str:
     clean_arrow_url = str(arrow_url).replace("\\", "/") if arrow_url else ""
     return f"""
         QMainWindow, QDialog, QMessageBox {{
-            background-color: {p['bg_window']};
+            background-color: {p["bg_window"]};
             font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
-            color: {p['text_primary']};
+            color: {p["text_primary"]};
         }}
         QWidget {{
             font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
-            color: {p['text_primary']};
+            color: {p["text_primary"]};
         }}
         /* Diálogos modales y cuadros de mensaje (QDialog & QMessageBox) */
         QDialog, QMessageBox {{
-            background-color: {p['bg_window']};
-            color: {p['text_primary']};
+            background-color: {p["bg_window"]};
+            color: {p["text_primary"]};
         }}
         QMessageBox QLabel, QDialog QLabel {{
-            color: {p['text_primary']};
+            color: {p["text_primary"]};
             background-color: transparent;
         }}
         QMessageBox QLabel#qt_msgbox_label {{
             font-size: 13px;
             font-weight: 500;
-            color: {p['text_primary']};
+            color: {p["text_primary"]};
             line-height: 1.4;
             background-color: transparent;
         }}
         QMessageBox QLabel#qt_msgbox_informativelabel {{
             font-size: 12px;
-            color: {p['text_secondary']};
+            color: {p["text_secondary"]};
             background-color: transparent;
         }}
         QMessageBox QLabel#qt_msgboxex_icon_label {{
             background-color: transparent;
         }}
         QMessageBox QPushButton, QDialog QPushButton {{
-            background-color: {p['bg_button']};
-            border: 1px solid {p['border_input']};
+            background-color: {p["bg_button"]};
+            border: 1px solid {p["border_input"]};
             border-radius: 6px;
             padding: 6px 18px;
             min-width: 68px;
             min-height: 20px;
             font-size: 12px;
             font-weight: 600;
-            color: {p['text_primary']};
+            color: {p["text_primary"]};
         }}
         QMessageBox QPushButton:hover, QDialog QPushButton:hover {{
-            background-color: {p['bg_button_hover']};
-            border-color: {p['border_input_hover']};
+            background-color: {p["bg_button_hover"]};
+            border-color: {p["border_input_hover"]};
         }}
         QMessageBox QPushButton:pressed, QDialog QPushButton:pressed {{
-            background-color: {p['bg_button_pressed']};
+            background-color: {p["bg_button_pressed"]};
         }}
         QMessageBox QPushButton:focus, QDialog QPushButton:focus {{
-            border: 1px solid {p['border_focus']};
+            border: 1px solid {p["border_focus"]};
         }}
         QMessageBox QPushButton:default, QDialog QPushButton:default {{
-            background-color: {p['primary']};
+            background-color: {p["primary"]};
             color: #ffffff;
-            border: 1px solid {p['primary']};
+            border: 1px solid {p["primary"]};
             font-weight: 700;
         }}
         QMessageBox QPushButton:default:hover, QDialog QPushButton:default:hover {{
-            background-color: {p['primary_hover']};
-            border-color: {p['primary_hover']};
+            background-color: {p["primary_hover"]};
+            border-color: {p["primary_hover"]};
         }}
         QMessageBox QDialogButtonBox {{
             background-color: transparent;
@@ -668,122 +697,122 @@ def build_global_stylesheet(is_dark: bool, arrow_url: str = "") -> str:
         }}
         QMessageBox QTextEdit, QMessageBox QPlainTextEdit,
         QDialog QTextEdit, QDialog QPlainTextEdit {{
-            background-color: {p['bg_input']};
-            color: {p['text_primary']};
-            border: 1px solid {p['border_input']};
+            background-color: {p["bg_input"]};
+            color: {p["text_primary"]};
+            border: 1px solid {p["border_input"]};
             border-radius: 6px;
         }}
         /* Header */
         #headerFrame {{
-            background-color: {p['bg_header']};
-            border-bottom: 1px solid {p['border']};
+            background-color: {p["bg_header"]};
+            border-bottom: 1px solid {p["border"]};
             padding: 10px 18px;
         }}
         #titleLabel {{
             font-size: 15px;
             font-weight: 700;
-            color: {p['text_title']};
+            color: {p["text_title"]};
         }}
         #subtitleLabel {{
             font-size: 11px;
-            color: {p['text_muted']};
+            color: {p["text_muted"]};
         }}
         /* Cards semánticas */
         QFrame[card="true"] {{
-            background-color: {p['bg_card']};
-            border: 1px solid {p['border']};
+            background-color: {p["bg_card"]};
+            border: 1px solid {p["border"]};
             border-radius: 8px;
         }}
         /* Títulos y textos semánticos dentro de tarjetas */
         QLabel[heading="true"] {{
             font-size: 15px;
             font-weight: 700;
-            color: {p['text_title']};
+            color: {p["text_title"]};
         }}
         QLabel[heading_small="true"] {{
             font-size: 12px;
             font-weight: 600;
-            color: {p['text_primary']};
+            color: {p["text_primary"]};
         }}
         QLabel[secondary="true"] {{
             font-size: 11px;
-            color: {p['text_secondary']};
+            color: {p["text_secondary"]};
         }}
         QLabel[note="true"] {{
             font-size: 11px;
             font-style: italic;
-            color: {p['text_muted']};
+            color: {p["text_muted"]};
         }}
         /* Tab Widget */
         QTabWidget::pane {{
-            border: 1px solid {p['border']};
+            border: 1px solid {p["border"]};
             border-radius: 8px;
-            background-color: {p['bg_window']};
+            background-color: {p["bg_window"]};
             top: -1px;
         }}
         QTabBar::tab {{
-            background: {p['tab_bg']};
-            color: {p['tab_text']};
+            background: {p["tab_bg"]};
+            color: {p["tab_text"]};
             padding: 8px 16px;
             font-size: 12px;
             font-weight: 600;
-            border: 1px solid {p['border']};
+            border: 1px solid {p["border"]};
             border-bottom: none;
             border-top-left-radius: 6px;
             border-top-right-radius: 6px;
             margin-right: 4px;
         }}
         QTabBar::tab:selected {{
-            background: {p['primary']};
+            background: {p["primary"]};
             color: #ffffff;
-            border-color: {p['primary']};
+            border-color: {p["primary"]};
         }}
         QTabBar::tab:hover:!selected {{
-            background: {p['tab_hover']};
-            color: {p['tab_hover_text']};
+            background: {p["tab_hover"]};
+            color: {p["tab_hover_text"]};
         }}
         /* Inputs */
         QLineEdit {{
-            background-color: {p['bg_input']};
-            border: 1px solid {p['border_input']};
+            background-color: {p["bg_input"]};
+            border: 1px solid {p["border_input"]};
             border-radius: 6px;
             padding: 6px 10px;
             font-size: 12px;
-            color: {p['text_primary']};
+            color: {p["text_primary"]};
         }}
         QLineEdit:hover {{
-            border-color: {p['border_input_hover']};
+            border-color: {p["border_input_hover"]};
         }}
         QLineEdit:focus {{
-            border: 1px solid {p['border_focus']};
+            border: 1px solid {p["border_focus"]};
         }}
         /* Dropdowns (QComboBox) */
         QComboBox {{
-            background-color: {p['bg_input']};
-            border: 1px solid {p['border_input']};
+            background-color: {p["bg_input"]};
+            border: 1px solid {p["border_input"]};
             border-radius: 6px;
             padding: 6px 30px 6px 10px;
             font-size: 12px;
-            color: {p['text_primary']};
+            color: {p["text_primary"]};
             min-height: 20px;
         }}
         QComboBox:hover {{
-            border-color: {p['border_input_hover']};
+            border-color: {p["border_input_hover"]};
         }}
         QComboBox:focus, QComboBox:on {{
-            border: 1px solid {p['border_focus']};
+            border: 1px solid {p["border_focus"]};
         }}
         QComboBox::drop-down {{
             subcontrol-origin: padding;
             subcontrol-position: top right;
             width: 26px;
-            border-left: 1px solid {p['border']};
+            border-left: 1px solid {p["border"]};
             border-top-right-radius: 5px;
             border-bottom-right-radius: 5px;
-            background-color: {p['dropdown_bg']};
+            background-color: {p["dropdown_bg"]};
         }}
         QComboBox::drop-down:hover {{
-            background-color: {p['dropdown_hover']};
+            background-color: {p["dropdown_hover"]};
         }}
         QComboBox::down-arrow {{
             image: url("{clean_arrow_url}");
@@ -794,90 +823,90 @@ def build_global_stylesheet(is_dark: bool, arrow_url: str = "") -> str:
             opacity: 0.3;
         }}
         QComboBox QAbstractItemView {{
-            border: 1px solid {p['border_input']};
+            border: 1px solid {p["border_input"]};
             border-radius: 6px;
-            background-color: {p['bg_card']};
-            color: {p['text_primary']};
-            selection-background-color: {p['primary']};
+            background-color: {p["bg_card"]};
+            color: {p["text_primary"]};
+            selection-background-color: {p["primary"]};
             selection-color: #ffffff;
             outline: 0;
             padding: 4px;
         }}
         /* Buttons */
         QPushButton {{
-            background-color: {p['bg_button']};
-            border: 1px solid {p['border']};
+            background-color: {p["bg_button"]};
+            border: 1px solid {p["border"]};
             border-radius: 6px;
             padding: 7px 14px;
             font-size: 12px;
             font-weight: 600;
-            color: {p['text_primary']};
+            color: {p["text_primary"]};
         }}
         QPushButton:hover {{
-            background-color: {p['bg_button_hover']};
+            background-color: {p["bg_button_hover"]};
         }}
         QPushButton:pressed {{
-            background-color: {p['bg_button_pressed']};
+            background-color: {p["bg_button_pressed"]};
         }}
         QPushButton:disabled {{
-            background-color: {p['bg_button']};
-            color: {p['text_muted']};
-            border-color: {p['border']};
+            background-color: {p["bg_button"]};
+            color: {p["text_muted"]};
+            border-color: {p["border"]};
         }}
         /* Semantic button variants */
         QPushButton[variant="primary"], #btnLaunch, #btnRobotTerminal {{
-            background-color: {p['primary']};
+            background-color: {p["primary"]};
             color: #ffffff;
             border: none;
             font-weight: 700;
         }}
         QPushButton[variant="primary"]:hover, #btnLaunch:hover, #btnRobotTerminal:hover {{
-            background-color: {p['primary_hover']};
+            background-color: {p["primary_hover"]};
         }}
         QPushButton[variant="primary"]:disabled, #btnLaunch:disabled, #btnRobotTerminal:disabled {{
-            background-color: {p['bg_button']};
-            color: {p['text_muted']};
-            border: 1px solid {p['border']};
+            background-color: {p["bg_button"]};
+            color: {p["text_muted"]};
+            border: 1px solid {p["border"]};
         }}
         QPushButton[variant="success"] {{
-            background-color: {p['success']};
+            background-color: {p["success"]};
             color: #ffffff;
             border: none;
             font-weight: 700;
         }}
         QPushButton[variant="success"]:hover {{
-            background-color: {p['success_hover']};
+            background-color: {p["success_hover"]};
         }}
         /* Header buttons */
         #btnHeaderUpdate, #btnDocker, #btnThemeToggle {{
-            background-color: {p['bg_button']};
-            color: {p['text_primary']};
-            border: 1px solid {p['border']};
+            background-color: {p["bg_button"]};
+            color: {p["text_primary"]};
+            border: 1px solid {p["border"]};
             font-weight: 600;
             font-size: 11px;
             border-radius: 6px;
             padding: 0 10px;
         }}
         #btnHeaderUpdate:hover, #btnDocker:hover, #btnThemeToggle:hover {{
-            background-color: {p['bg_button_hover']};
+            background-color: {p["bg_button_hover"]};
         }}
         #btnHeaderUpdate[variant="success"] {{
-            background-color: {p['success']};
+            background-color: {p["success"]};
             color: #ffffff;
             border: none;
             font-weight: 700;
         }}
         #btnHeaderUpdate[variant="success"]:hover {{
-            background-color: {p['success_hover']};
+            background-color: {p["success_hover"]};
         }}
         #btnDocker[variant="primary"] {{
-            background-color: {p['primary']};
+            background-color: {p["primary"]};
             color: #ffffff;
-            border: 1px solid {p['primary_hover']};
+            border: 1px solid {p["primary_hover"]};
             font-weight: 700;
         }}
         #btnDocker[variant="primary"]:hover {{
-            background-color: {p['primary_hover']};
+            background-color: {p["primary_hover"]};
         }}
         #btnDocker[variant="danger"] {{
             background-color: {err_bg};
@@ -889,14 +918,14 @@ def build_global_stylesheet(is_dark: bool, arrow_url: str = "") -> str:
             background-color: {err_border};
         }}
         #btnTerminal {{
-            background-color: {p['btn_terminal_bg']};
+            background-color: {p["btn_terminal_bg"]};
             color: #ffffff;
-            border: 1px solid {p['btn_terminal_border']};
+            border: 1px solid {p["btn_terminal_border"]};
             font-weight: 700;
             padding: 9px 12px;
         }}
         #btnTerminal:hover {{
-            background-color: {p['btn_terminal_hover']};
+            background-color: {p["btn_terminal_hover"]};
         }}
         #btnWeb {{
             background-color: #0284c7;
@@ -909,46 +938,46 @@ def build_global_stylesheet(is_dark: bool, arrow_url: str = "") -> str:
             background-color: #0369a1;
         }}
         #btnStop {{
-            background-color: {p['danger']};
+            background-color: {p["danger"]};
             color: #ffffff;
             border: none;
             font-weight: 700;
             padding: 9px 12px;
         }}
         #btnStop:hover {{
-            background-color: {p['danger_hover']};
+            background-color: {p["danger_hover"]};
         }}
         #btnStop:disabled {{
-            background-color: {p['bg_button']};
-            color: {p['text_muted']};
-            border: 1px solid {p['border']};
+            background-color: {p["bg_button"]};
+            color: {p["text_muted"]};
+            border: 1px solid {p["border"]};
         }}
         /* Progress Bar */
         QProgressBar {{
-            border: 1px solid {p['border_input']};
+            border: 1px solid {p["border_input"]};
             border-radius: 6px;
             text-align: center;
-            background-color: {p['progress_bg']};
-            color: {p['text_primary']};
+            background-color: {p["progress_bg"]};
+            color: {p["text_primary"]};
             height: 16px;
             font-size: 10px;
             font-weight: 600;
         }}
         QProgressBar::chunk {{
-            background-color: {p['primary']};
+            background-color: {p["primary"]};
             border-radius: 5px;
         }}
         /* Scenario description box */
         #scenarioDescFrame {{
-            background-color: {p['card_desc_bg']};
-            border: 1px solid {p['card_desc_border']};
+            background-color: {p["card_desc_bg"]};
+            border: 1px solid {p["card_desc_border"]};
             border-radius: 6px;
             padding: 8px 12px;
         }}
         #lblScenarioDesc {{
             font-size: 11px;
             font-style: italic;
-            color: {p['text_secondary']};
+            color: {p["text_secondary"]};
         }}
         /* Log box & Guide */
         #txtLogs {{
@@ -956,14 +985,14 @@ def build_global_stylesheet(is_dark: bool, arrow_url: str = "") -> str:
             color: #e2e8f0;
             font-family: 'Cascadia Code', 'Consolas', 'DejaVu Sans Mono', monospace;
             font-size: 11px;
-            border: 1px solid {p['logs_border']};
+            border: 1px solid {p["logs_border"]};
             border-radius: 6px;
             padding: 8px;
         }}
         #txtGuide {{
-            background-color: {p['bg_card']};
-            color: {p['text_primary']};
-            border: 1px solid {p['border']};
+            background-color: {p["bg_card"]};
+            color: {p["text_primary"]};
+            border: 1px solid {p["border"]};
             border-radius: 6px;
             padding: 16px;
             font-size: 13px;
@@ -986,12 +1015,12 @@ def build_global_stylesheet(is_dark: bool, arrow_url: str = "") -> str:
             border-radius: 4px;
         }}
         QScrollBar::handle:vertical {{
-            background-color: {p['border_input_hover']};
+            background-color: {p["border_input_hover"]};
             min-height: 25px;
             border-radius: 4px;
         }}
         QScrollBar::handle:vertical:hover {{
-            background-color: {p['border_focus']};
+            background-color: {p["border_focus"]};
         }}
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
             border: none;
@@ -1010,12 +1039,12 @@ def build_global_stylesheet(is_dark: bool, arrow_url: str = "") -> str:
             border-radius: 4px;
         }}
         QScrollBar::handle:horizontal {{
-            background-color: {p['border_input_hover']};
+            background-color: {p["border_input_hover"]};
             min-width: 25px;
             border-radius: 4px;
         }}
         QScrollBar::handle:horizontal:hover {{
-            background-color: {p['border_focus']};
+            background-color: {p["border_focus"]};
         }}
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
             border: none;

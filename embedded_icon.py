@@ -12,6 +12,7 @@ FAVICON_ICO_BASE64 = "AAABAAIAEBAAAAEAIAAoBAAAJgAAACAgAAABACAAKBAAAE4EAAAoAAAAEA
 import sys
 import PySide6.QtSvg  # noqa: F401 — side-effect import; ensures Qt SVG plugin is bundled by PyInstaller
 
+
 def get_app_icon_path() -> Path:
     """
     Retorna la ruta al archivo .ico de la aplicación.
@@ -26,7 +27,7 @@ def get_app_icon_path() -> Path:
             bundle_dir / "assets" / "app_icon.ico",
             bundle_dir / "assets" / "favicon.ico",
             bundle_dir / "app_icon.ico",
-            bundle_dir / "favicon.ico"
+            bundle_dir / "favicon.ico",
         ]:
             if cand.is_file() and cand.stat().st_size > 0:
                 return cand
@@ -80,7 +81,7 @@ def get_dropdown_arrow_path(dark_mode: bool = False) -> Path:
             bundle_dir / "assets" / f"chevron_down{suffix}.svg",
             bundle_dir / "assets" / f"chevron_down{suffix}.png",
             bundle_dir / "assets" / "chevron_down.png",
-            bundle_dir / "chevron_down.png"
+            bundle_dir / "chevron_down.png",
         ]:
             if cand.is_file() and cand.stat().st_size > 0:
                 return cand
@@ -95,14 +96,16 @@ def get_dropdown_arrow_path(dark_mode: bool = False) -> Path:
     svg_content = (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
         f'<polyline points="6 9 12 15 18 9" fill="none" stroke="{stroke_color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'
-        f'</svg>'
+        f"</svg>"
     )
     try:
         assets_dir.mkdir(parents=True, exist_ok=True)
         svg_cand.write_text(svg_content, encoding="utf-8")
         return svg_cand
     except Exception:
-        temp_svg = Path(tempfile.gettempdir()) / f"ros2_sim_launcher_chevron_down{suffix}.svg"
+        temp_svg = (
+            Path(tempfile.gettempdir()) / f"ros2_sim_launcher_chevron_down{suffix}.svg"
+        )
         try:
             temp_svg.write_text(svg_content, encoding="utf-8")
             return temp_svg
@@ -122,13 +125,11 @@ VECTOR_ICONS = {
     "view-refresh": '<polyline points="23 4 23 10 17 10" fill="none" stroke="{color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="1 20 1 14 7 14" fill="none" stroke="{color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" fill="none" stroke="{color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
     "system-software-update": '<circle cx="12" cy="12" r="10" fill="none" stroke="{color}" stroke-width="2"/><polyline points="16 12 12 8 8 12" fill="none" stroke="{color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="16" x2="12" y2="8" stroke="{color}" stroke-width="2.2" stroke-linecap="round"/>',
     "process-working": '<line x1="12" y1="2" x2="12" y2="6" stroke="{color}" stroke-width="2.5" stroke-linecap="round"/><line x1="12" y1="18" x2="12" y2="22" stroke="{color}" stroke-width="2.5" stroke-linecap="round"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76" stroke="{color}" stroke-width="2.5" stroke-linecap="round"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07" stroke="{color}" stroke-width="2.5" stroke-linecap="round"/><line x1="2" y1="12" x2="6" y2="12" stroke="{color}" stroke-width="2.5" stroke-linecap="round"/><line x1="18" y1="12" x2="22" y2="12" stroke="{color}" stroke-width="2.5" stroke-linecap="round"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24" stroke="{color}" stroke-width="2.5" stroke-linecap="round"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93" stroke="{color}" stroke-width="2.5" stroke-linecap="round"/>',
-
     # Tabs
     "document-properties": '<circle cx="12" cy="12" r="3" fill="none" stroke="{color}" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="{color}" stroke-width="2"/>',
     "applications-development": '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
     "applications-system": '<line x1="4" y1="21" x2="4" y2="14" stroke="{color}" stroke-width="2" stroke-linecap="round"/><line x1="4" y1="10" x2="4" y2="3" stroke="{color}" stroke-width="2" stroke-linecap="round"/><line x1="12" y1="21" x2="12" y2="12" stroke="{color}" stroke-width="2" stroke-linecap="round"/><line x1="12" y1="8" x2="12" y2="3" stroke="{color}" stroke-width="2" stroke-linecap="round"/><line x1="20" y1="21" x2="20" y2="16" stroke="{color}" stroke-width="2" stroke-linecap="round"/><line x1="20" y1="12" x2="20" y2="3" stroke="{color}" stroke-width="2" stroke-linecap="round"/><line x1="1" y1="14" x2="7" y2="14" stroke="{color}" stroke-width="2" stroke-linecap="round"/><line x1="9" y1="8" x2="15" y2="8" stroke="{color}" stroke-width="2" stroke-linecap="round"/><line x1="17" y1="16" x2="23" y2="16" stroke="{color}" stroke-width="2" stroke-linecap="round"/>',
     "help-browser": '<circle cx="12" cy="12" r="10" fill="none" stroke="{color}" stroke-width="2"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round"/><line x1="12" y1="17" x2="12.01" y2="17" stroke="{color}" stroke-width="2.5" stroke-linecap="round"/>',
-
     # Tools and inner controls
     "document-open": '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
     "go-down": '<line x1="12" y1="5" x2="12" y2="19" stroke="{color}" stroke-width="2.2" stroke-linecap="round"/><polyline points="19 12 12 19 5 12" fill="none" stroke="{color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -147,7 +148,7 @@ def _render_vector_icon(
     key: str,
     normal_color: str,
     selected_color: Optional[str] = None,
-    disabled_color: Optional[str] = None
+    disabled_color: Optional[str] = None,
 ) -> "QtGui.QIcon":
     """
     Renderiza un SVG vectorial nítido a múltiples resoluciones (16..128px)
@@ -195,6 +196,7 @@ def _render_vector_icon(
 
 def _tint_pixmap(pm: "QtGui.QPixmap", color_hex: str) -> "QtGui.QPixmap":
     from PySide6 import QtGui, QtCore
+
     tinted = QtGui.QPixmap(pm.size())
     tinted.fill(QtCore.Qt.GlobalColor.transparent)
     p = QtGui.QPainter(tinted)
@@ -210,7 +212,7 @@ def get_themed_icon(
     color: Optional[str] = None,
     selected_color: Optional[str] = None,
     disabled_color: Optional[str] = None,
-    fallback_sp: Optional["QtWidgets.QStyle.StandardPixmap"] = None
+    fallback_sp: Optional["QtWidgets.QStyle.StandardPixmap"] = None,
 ) -> "QtGui.QIcon":
     """
     Retorna un icono moderno de alta resolución, renderizado vectorialmente (SVG)
@@ -257,5 +259,3 @@ def get_themed_icon(
             icon.addPixmap(dis_pm, QtGui.QIcon.Mode.Disabled)
 
     return icon
-
-

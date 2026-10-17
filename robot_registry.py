@@ -38,7 +38,9 @@ def _build_ensure_assets_cmd(world_name: Any) -> str:
     cmds = []
     if _NODOCK_LAUNCH_B64:
         p = "/opt/ros/jazzy/share/turtlebot4_gz_bringup/launch/turtlebot4_nodock.launch.py"
-        cmds.append(f"open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{_NODOCK_LAUNCH_B64}')))")
+        cmds.append(
+            f"open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{_NODOCK_LAUNCH_B64}')))"
+        )
 
     # Inyección dinámica de mundo si existe archivo SDF local
     world_sdf = _WORLDS_DIR / f"{world_enum.value}.sdf"
@@ -46,7 +48,9 @@ def _build_ensure_assets_cmd(world_name: Any) -> str:
         sdf_b64 = _read_b64(world_sdf)
         if sdf_b64:
             p = f"/opt/ros/jazzy/share/turtlebot4_gz_bringup/worlds/{world_enum.value}.sdf"
-            cmds.append(f"open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{sdf_b64}')))")
+            cmds.append(
+                f"open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{sdf_b64}')))"
+            )
 
     # Inyección dinámica de mapa si existen archivos YAML/PNG locales
     map_yaml = _MAPS_DIR / f"{world_enum.value}.yaml"
@@ -54,14 +58,18 @@ def _build_ensure_assets_cmd(world_name: Any) -> str:
         yaml_b64 = _read_b64(map_yaml)
         if yaml_b64:
             p = f"/opt/ros/jazzy/share/turtlebot4_navigation/maps/{world_enum.value}.yaml"
-            cmds.append(f"os.path.exists('{p}') or open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{yaml_b64}')))")
+            cmds.append(
+                f"os.path.exists('{p}') or open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{yaml_b64}')))"
+            )
 
     map_png = _MAPS_DIR / f"{world_enum.value}.png"
     if map_png.is_file():
         png_b64 = _read_b64(map_png)
         if png_b64:
             p = f"/opt/ros/jazzy/share/turtlebot4_navigation/maps/{world_enum.value}.png"
-            cmds.append(f"os.path.exists('{p}') or open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{png_b64}')))")
+            cmds.append(
+                f"os.path.exists('{p}') or open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{png_b64}')))"
+            )
 
     # Configuración de postura de cámara GUI según el mundo
     if world_enum == SimulationWorld.CLASSROOM:
@@ -86,8 +94,10 @@ def _build_ensure_assets_cmd(world_name: Any) -> str:
 
 # --- Enums para mayor robustez y extensibilidad futura ---
 
+
 class SimulationWorld(str, Enum):
     """Mundos de simulación Gazebo soportados."""
+
     EMPTY = "empty"
     WALL = "wall"
     CLASSROOM = "classroom"
@@ -114,7 +124,9 @@ class SimulationWorld(str, Enum):
         return any(w.value.lower() == val_str for w in cls)
 
     @classmethod
-    def from_str(cls, val: Any, default: Optional["SimulationWorld"] = None) -> "SimulationWorld":
+    def from_str(
+        cls, val: Any, default: Optional["SimulationWorld"] = None
+    ) -> "SimulationWorld":
         """Convierte una cadena a SimulationWorld con fallback seguro."""
         if default is None:
             default = cls.EMPTY
@@ -129,6 +141,7 @@ class SimulationWorld(str, Enum):
 
 class ScenarioId(str, Enum):
     """Identificadores únicos de escenarios de ejecución."""
+
     CONTAINER_ONLY = "container_only"
     SIM_ONLY = "sim_only"
     RVIZ2 = "rviz2"
@@ -158,6 +171,7 @@ class ScenarioId(str, Enum):
 
 class RobotId(str, Enum):
     """Identificadores únicos de perfiles de robot."""
+
     BASE = "base"
     TURTLEBOT4 = "turtlebot4"
 
@@ -188,6 +202,7 @@ class RobotId(str, Enum):
 @dataclass
 class Scenario:
     """Representa un escenario o modo de ejecución de ROS 2 para un robot."""
+
     id: str
     name: str
     description: str
@@ -207,7 +222,7 @@ class RobotProfile:
         description: str,
         supported_worlds: List[str],
         scenarios: List[Scenario],
-        command_builder: Callable[[str, str, str, bool], str]
+        command_builder: Callable[[str, str, str, bool], str],
     ):
         self.id = id.value if isinstance(id, Enum) else id
         self.name = name
@@ -217,7 +232,9 @@ class RobotProfile:
         self.command_builder = command_builder
 
     def get_scenario_by_id(self, scenario_id: Any) -> Optional[Scenario]:
-        sc_val = scenario_id.value if isinstance(scenario_id, Enum) else str(scenario_id)
+        sc_val = (
+            scenario_id.value if isinstance(scenario_id, Enum) else str(scenario_id)
+        )
         target_id = ScenarioId.CONTAINER_ONLY.value if sc_val == "bash" else sc_val
         for sc in self.scenarios:
             if sc.id == target_id:
@@ -234,11 +251,18 @@ class RobotProfile:
                     return sc
         return None
 
-    def build_command(self, scenario_id: str, world_name: str, extra_args: str = "", force_rebuild: bool = False) -> str:
+    def build_command(
+        self,
+        scenario_id: str,
+        world_name: str,
+        extra_args: str = "",
+        force_rebuild: bool = False,
+    ) -> str:
         return self.command_builder(scenario_id, world_name, extra_args, force_rebuild)
 
 
 # --- Generadores de comandos para robots específicos ---
+
 
 def _build_env_prefix(force_rebuild: bool) -> str:
     force_val = "1" if force_rebuild else "0"
@@ -260,7 +284,9 @@ def _build_container_only_command() -> str:
     )
 
 
-def _build_turtlebot4_command(scenario_id: str, world_name: str, extra_args: str, force_rebuild: bool) -> str:
+def _build_turtlebot4_command(
+    scenario_id: str, world_name: str, extra_args: str, force_rebuild: bool
+) -> str:
     env = _build_env_prefix(force_rebuild)
     args = extra_args.strip()
 
@@ -280,7 +306,11 @@ def _build_turtlebot4_command(scenario_id: str, world_name: str, extra_args: str
     sc_str = scenario_id.value if isinstance(scenario_id, Enum) else scenario_id
 
     if sc_str == ScenarioId.NAV2.value:
-        loc_part = "localization:=true" if SimulationWorld.has_map(world_enum) else "slam:=true"
+        loc_part = (
+            "localization:=true"
+            if SimulationWorld.has_map(world_enum)
+            else "slam:=true"
+        )
         return f"{prefix} && ros2 launch turtlebot4_gz_bringup {launch_file} world:={actual_world} nav2:=true {loc_part} rviz:=true {args}".strip()
     elif sc_str == ScenarioId.SLAM.value:
         return f"{prefix} && ros2 launch turtlebot4_gz_bringup {launch_file} world:={actual_world} slam:=true nav2:=true rviz:=true {args}".strip()
@@ -294,7 +324,9 @@ def _build_turtlebot4_command(scenario_id: str, world_name: str, extra_args: str
         return _build_container_only_command()
 
 
-def _build_generic_command(scenario_id: str, world_name: str, extra_args: str, force_rebuild: bool) -> str:
+def _build_generic_command(
+    scenario_id: str, world_name: str, extra_args: str, force_rebuild: bool
+) -> str:
     env = (
         "source /opt/ros/jazzy/setup.bash && "
         "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi"
@@ -315,33 +347,33 @@ STANDARD_SCENARIOS = [
     Scenario(
         id=ScenarioId.CONTAINER_ONLY,
         name="Solo contenedor (sin procesos / modo libre)",
-        description="Inicia el contenedor Docker con el workspace montado y servidor noVNC activo, sin ningún nodo ni launch. Control total mediante terminal."
+        description="Inicia el contenedor Docker con el workspace montado y servidor noVNC activo, sin ningún nodo ni launch. Control total mediante terminal.",
     ),
     Scenario(
         id=ScenarioId.SIM_ONLY,
         name="Solo simulación Gazebo",
-        description="Ejecuta exclusivamente el simulador Gazebo con el robot en el mundo seleccionado."
+        description="Ejecuta exclusivamente el simulador Gazebo con el robot en el mundo seleccionado.",
     ),
     Scenario(
         id=ScenarioId.RVIZ2,
         name="Solo visualización RViz2",
-        description="Abre RViz2 con la descripción cinemática y modelo visual del robot."
+        description="Abre RViz2 con la descripción cinemática y modelo visual del robot.",
     ),
     Scenario(
         id=ScenarioId.NAV2,
         name="Gazebo Sim + Nav2 (Navegación completa y RViz2)",
-        description="Simulación completa en Gazebo con localización AMCL/Nav2, planificación global/local y visualización en RViz2."
+        description="Simulación completa en Gazebo con localización AMCL/Nav2, planificación global/local y visualización en RViz2.",
     ),
     Scenario(
         id=ScenarioId.SLAM,
         name="Gazebo Sim + SLAM Toolbox (Modo mapeo)",
-        description="Generación de mapas en tiempo real con SLAM Toolbox mediante LIDAR y teleoperación."
+        description="Generación de mapas en tiempo real con SLAM Toolbox mediante LIDAR y teleoperación.",
     ),
     Scenario(
         id=ScenarioId.TELEOP,
         name="Teleoperación por teclado",
-        description="Control interactivo de velocidad lineal y angular (teleop_twist_keyboard)."
-    )
+        description="Control interactivo de velocidad lineal y angular (teleop_twist_keyboard).",
+    ),
 ]
 
 
@@ -356,20 +388,20 @@ ROBOT_REGISTRY: Dict[str, RobotProfile] = {
             Scenario(
                 id=ScenarioId.CONTAINER_ONLY,
                 name="Solo contenedor (sin procesos / modo libre)",
-                description="Inicia el contenedor Docker con el workspace montado y servidor noVNC activo, sin ningún nodo ni launch. Control total mediante terminal."
+                description="Inicia el contenedor Docker con el workspace montado y servidor noVNC activo, sin ningún nodo ni launch. Control total mediante terminal.",
             ),
             Scenario(
                 id=ScenarioId.RVIZ2,
                 name="Solo visualización RViz2",
-                description="Abre RViz2 en el entorno virtual noVNC para visualización de topics y modelos."
+                description="Abre RViz2 en el entorno virtual noVNC para visualización de topics y modelos.",
             ),
             Scenario(
                 id=ScenarioId.TELEOP,
                 name="Teleoperación por teclado",
-                description="Control interactivo de velocidad lineal y angular (teleop_twist_keyboard)."
+                description="Control interactivo de velocidad lineal y angular (teleop_twist_keyboard).",
             ),
         ],
-        command_builder=_build_generic_command
+        command_builder=_build_generic_command,
     ),
     "turtlebot4": RobotProfile(
         id=RobotId.TURTLEBOT4,
@@ -377,8 +409,8 @@ ROBOT_REGISTRY: Dict[str, RobotProfile] = {
         description="Plataforma diferencial estándar de la asignatura con cámara OAK-D y LiDAR 2D.",
         supported_worlds=[w.value for w in SimulationWorld.all_simulation_worlds()],
         scenarios=STANDARD_SCENARIOS,
-        command_builder=_build_turtlebot4_command
-    )
+        command_builder=_build_turtlebot4_command,
+    ),
 }
 
 
@@ -389,7 +421,9 @@ def get_all_robots() -> List[RobotProfile]:
 
 def get_robot_by_id(robot_id: Any) -> Optional[RobotProfile]:
     """Busca un robot por su identificador clave."""
-    val = robot_id.value if isinstance(robot_id, Enum) else str(robot_id).strip().lower()
+    val = (
+        robot_id.value if isinstance(robot_id, Enum) else str(robot_id).strip().lower()
+    )
     if val in (RobotId.BASE.value, "generic"):
         return ROBOT_REGISTRY.get("generic")
     return ROBOT_REGISTRY.get(val)
@@ -406,4 +440,3 @@ def get_robot_by_name(name_str: str) -> Optional[RobotProfile]:
         ):
             return r
     return ROBOT_REGISTRY.get(RobotId.TURTLEBOT4.value)
-

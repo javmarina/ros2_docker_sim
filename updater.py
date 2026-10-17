@@ -30,16 +30,22 @@ logger = logging.getLogger("updater")
 DEFAULT_GITHUB_REPO = "javmarina/ros2_docker_sim"
 
 # URL de la API de GitHub para obtener version.json en tiempo real (sin la caché de CDN)
-DEFAULT_API_VERSION_URL = f"https://api.github.com/repos/{DEFAULT_GITHUB_REPO}/contents/version.json?ref=main"
+DEFAULT_API_VERSION_URL = (
+    f"https://api.github.com/repos/{DEFAULT_GITHUB_REPO}/contents/version.json?ref=main"
+)
 
 # URL directa al version.json en la rama principal (raw.githubusercontent.com)
-DEFAULT_VERSION_URL = f"https://raw.githubusercontent.com/{DEFAULT_GITHUB_REPO}/main/version.json"
+DEFAULT_VERSION_URL = (
+    f"https://raw.githubusercontent.com/{DEFAULT_GITHUB_REPO}/main/version.json"
+)
 
 # URL directa al ejecutable de la release más reciente
 DEFAULT_EXE_RELEASE_URL = f"https://github.com/{DEFAULT_GITHUB_REPO}/releases/latest/download/ros2_sim_launcher.exe"
 
 # URL de respaldo para descargar el archivo zip de la rama principal
-DEFAULT_ARCHIVE_URL = f"https://github.com/{DEFAULT_GITHUB_REPO}/archive/refs/heads/main.zip"
+DEFAULT_ARCHIVE_URL = (
+    f"https://github.com/{DEFAULT_GITHUB_REPO}/archive/refs/heads/main.zip"
+)
 
 
 def is_running_frozen() -> bool:
@@ -90,10 +96,10 @@ CURRENT_VERSION = get_local_version()
 
 def parse_version(v_str: str) -> Tuple[int, ...]:
     """Convierte una cadena como 'v1.2.3' o '1.2' en una tupla de enteros (1, 2, 3) para comparar."""
-    cleaned = v_str.strip().lstrip('v').lstrip('V')
+    cleaned = v_str.strip().lstrip("v").lstrip("V")
     parts = []
-    for chunk in cleaned.split('.'):
-        num_str = ''.join(filter(str.isdigit, chunk))
+    for chunk in cleaned.split("."):
+        num_str = "".join(filter(str.isdigit, chunk))
         parts.append(int(num_str) if num_str else 0)
     result = tuple(parts)
     return result
@@ -105,7 +111,12 @@ def is_newer_version(remote_ver: str, local_ver: str = CURRENT_VERSION) -> bool:
         remote_tuple = parse_version(remote_ver)
         local_tuple = parse_version(local_ver)
         newer = remote_tuple > local_tuple
-        logger.debug("is_newer_version: remote %s > local %s -> %s", remote_tuple, local_tuple, newer)
+        logger.debug(
+            "is_newer_version: remote %s > local %s -> %s",
+            remote_tuple,
+            local_tuple,
+            newer,
+        )
         return newer
     except Exception as e:
         logger.error("is_newer_version error: %s", e, exc_info=True)
@@ -115,13 +126,15 @@ def is_newer_version(remote_ver: str, local_ver: str = CURRENT_VERSION) -> bool:
 def fetch_remote_version(
     version_url: str = DEFAULT_VERSION_URL,
     timeout: float = 3.0,
-    repo: str = DEFAULT_GITHUB_REPO
+    repo: str = DEFAULT_GITHUB_REPO,
 ) -> Tuple[bool, Optional[Dict[str, Any]], str]:
     """
     Comprueba si hay una nueva versión en GitHub mediante HTTP GET.
     Prioriza la API directa de GitHub para evitar la caché CDN de raw.githubusercontent.com.
     """
-    logger.info("fetch_remote_version: Consultando versiones remotas (timeout: %ss)...", timeout)
+    logger.info(
+        "fetch_remote_version: Consultando versiones remotas (timeout: %ss)...", timeout
+    )
 
     if "usuario/repo" in version_url or "usuario/repo" in repo:
         msg = "Repositorio de GitHub pendiente de configurar."
@@ -130,8 +143,23 @@ def fetch_remote_version(
 
     api_url = f"https://api.github.com/repos/{repo}/contents/version.json?ref=main"
     urls_to_try = [
-        (api_url, {"Accept": "application/vnd.github.v3.raw", "User-Agent": f"ROS2-Nav-Launcher/{get_local_version()}"}, "API de GitHub (en vivo)"),
-        (version_url, {"User-Agent": f"ROS2-Nav-Launcher/{get_local_version()}", "Cache-Control": "no-cache", "Pragma": "no-cache"}, "raw.githubusercontent.com (CDN)")
+        (
+            api_url,
+            {
+                "Accept": "application/vnd.github.v3.raw",
+                "User-Agent": f"ROS2-Nav-Launcher/{get_local_version()}",
+            },
+            "API de GitHub (en vivo)",
+        ),
+        (
+            version_url,
+            {
+                "User-Agent": f"ROS2-Nav-Launcher/{get_local_version()}",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+            },
+            "raw.githubusercontent.com (CDN)",
+        ),
     ]
 
     last_error = None
@@ -159,14 +187,18 @@ def check_for_updates(
     version_url: str = DEFAULT_VERSION_URL,
     timeout: float = 2.0,
     local_ver: Optional[str] = None,
-    force: bool = False
+    force: bool = False,
 ) -> Tuple[bool, Optional[Dict[str, Any]], str]:
     """
     Función principal de comprobación:
     Retorna (hay_actualizacion_disponible, info_dict, mensaje)
     """
     active_local_ver = local_ver or get_local_version()
-    logger.info("Iniciando comprobación de actualizaciones (Versión local: v%s, forzado: %s)", active_local_ver, force)
+    logger.info(
+        "Iniciando comprobación de actualizaciones (Versión local: v%s, forzado: %s)",
+        active_local_ver,
+        force,
+    )
     ok, data, msg = fetch_remote_version(version_url, timeout=timeout)
     if not ok or not data:
         return False, None, msg
@@ -176,7 +208,9 @@ def check_for_updates(
         if force and not is_newer_version(remote_ver, active_local_ver):
             msg = f"Reinstalación forzada: versión v{remote_ver} disponible (actual instalada: v{active_local_ver})."
         else:
-            msg = f"Nueva versión v{remote_ver} disponible (actual: v{active_local_ver})."
+            msg = (
+                f"Nueva versión v{remote_ver} disponible (actual: v{active_local_ver})."
+            )
         return True, data, msg
     else:
         msg = f"Ya tienes la última versión (v{active_local_ver})."
@@ -187,7 +221,7 @@ def _download_file(
     urls: list,
     dest_path: Path,
     progress_cb: Callable[[float, str], None],
-    desc_label: str = "archivo"
+    desc_label: str = "archivo",
 ) -> Tuple[bool, str]:
     """Descarga un archivo con barra de progreso intentando varias URLs alternativas."""
     response = None
@@ -196,10 +230,11 @@ def _download_file(
 
     for idx, url in enumerate(urls):
         try:
-            progress_cb(5.0 + idx * 3.0, f"Conectando al servidor ({url.split('/')[2]})...")
+            progress_cb(
+                5.0 + idx * 3.0, f"Conectando al servidor ({url.split('/')[2]})..."
+            )
             req = urllib.request.Request(
-                url,
-                headers={"User-Agent": f"ROS2-Nav-Launcher/{get_local_version()}"}
+                url, headers={"User-Agent": f"ROS2-Nav-Launcher/{get_local_version()}"}
             )
             resp = urllib.request.urlopen(req, timeout=25.0)
             if resp.status == 200:
@@ -229,9 +264,14 @@ def _download_file(
                     downloaded += len(chunk)
                     if total_size > 0:
                         pct = min(92.0, (downloaded / total_size) * 85.0 + 5.0)
-                        progress_cb(pct, f"Descargando {desc_label}... ({downloaded // (1024*1024):.1f} MB / {total_size // (1024*1024):.1f} MB)")
+                        progress_cb(
+                            pct,
+                            f"Descargando {desc_label}... ({downloaded // (1024 * 1024):.1f} MB / {total_size // (1024 * 1024):.1f} MB)",
+                        )
                     else:
-                        progress_cb(-1, f"Descargando {desc_label}... ({downloaded // 1024} KB)")
+                        progress_cb(
+                            -1, f"Descargando {desc_label}... ({downloaded // 1024} KB)"
+                        )
 
         return True, "Descarga completada."
     except Exception as e:
@@ -242,20 +282,26 @@ def download_and_apply_exe_update(
     download_url: str,
     progress_cb: Callable[[float, str], None],
     fallback_repo: str = DEFAULT_GITHUB_REPO,
-    target_exe: Optional[Path] = None
+    target_exe: Optional[Path] = None,
 ) -> Tuple[bool, str]:
     """
     Descarga el nuevo .exe de la versión y programa su sustitución al cerrar con entorno saneado.
     """
     current_exe = (target_exe or Path(sys.executable)).resolve()
-    temp_new_exe = Path(tempfile.gettempdir()) / f"ros2_sim_launcher_{os.getpid()}_new.exe"
+    temp_new_exe = (
+        Path(tempfile.gettempdir()) / f"ros2_sim_launcher_{os.getpid()}_new.exe"
+    )
 
     candidate_urls = []
     if download_url and "usuario/repo" not in download_url:
         candidate_urls.append(download_url)
-    candidate_urls.append(f"https://github.com/{fallback_repo}/releases/latest/download/ros2_sim_launcher.exe")
+    candidate_urls.append(
+        f"https://github.com/{fallback_repo}/releases/latest/download/ros2_sim_launcher.exe"
+    )
 
-    ok, msg = _download_file(candidate_urls, temp_new_exe, progress_cb, desc_label="nueva versión (.exe)")
+    ok, msg = _download_file(
+        candidate_urls, temp_new_exe, progress_cb, desc_label="nueva versión (.exe)"
+    )
     if not ok:
         return False, msg
 
@@ -265,7 +311,7 @@ def download_and_apply_exe_update(
     # Lanzamos un proceso en segundo plano (PowerShell) que espera a que este proceso termine,
     # reemplaza el ejecutable actual por el descargado con control de reintentos y vuelve a lanzar la app.
     pid = os.getpid()
-    
+
     if platform.system().lower() == "windows":
         updater_ps1 = Path(tempfile.gettempdir()) / f"ros2_updater_{pid}.ps1"
         ps_current_exe = str(current_exe).replace("'", "''")
@@ -350,12 +396,20 @@ Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction Silent
 """
         # Preparar entorno saneado para el subproceso de Windows
         clean_env = os.environ.copy()
-        for var in ["QT_PLUGIN_PATH", "QML2_IMPORT_PATH", "PYTHONPATH", "PYTHONHOME", "_MEIPASS2"]:
+        for var in [
+            "QT_PLUGIN_PATH",
+            "QML2_IMPORT_PATH",
+            "PYTHONPATH",
+            "PYTHONHOME",
+            "_MEIPASS2",
+        ]:
             clean_env.pop(var, None)
         if hasattr(sys, "_MEIPASS"):
             mei_dir = str(sys._MEIPASS).lower()
             dirs = clean_env.get("PATH", "").split(os.pathsep)
-            clean_env["PATH"] = os.pathsep.join(d for d in dirs if d.lower() != mei_dir and "_mei" not in d.lower())
+            clean_env["PATH"] = os.pathsep.join(
+                d for d in dirs if d.lower() != mei_dir and "_mei" not in d.lower()
+            )
 
         try:
             updater_ps1.write_text(ps_content, encoding="utf-8")
@@ -363,30 +417,46 @@ Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction Silent
 
             # Buscar ejecutable powershell nativo
             sys_root = os.environ.get("WINDIR", "C:\\Windows")
-            ps_native = Path(sys_root) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+            ps_native = (
+                Path(sys_root)
+                / "System32"
+                / "WindowsPowerShell"
+                / "v1.0"
+                / "powershell.exe"
+            )
             ps_cmd = str(ps_native) if ps_native.is_file() else "powershell.exe"
 
-            creationflags = subprocess.CREATE_NO_WINDOW if platform.system().lower() == "windows" else 0
+            creationflags = (
+                subprocess.CREATE_NO_WINDOW
+                if platform.system().lower() == "windows"
+                else 0
+            )
 
             subprocess.Popen(
                 [
                     ps_cmd,
-                    "-ExecutionPolicy", "Bypass",
-                    "-WindowStyle", "Hidden",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-WindowStyle",
+                    "Hidden",
                     "-NoProfile",
                     "-NonInteractive",
-                    "-File", str(updater_ps1)
+                    "-File",
+                    str(updater_ps1),
                 ],
                 creationflags=creationflags,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 close_fds=True,
-                env=clean_env
+                env=clean_env,
             )
             return True, "Reiniciando..."
         except Exception as e_ps:
-            logger.warning("No se pudo iniciar updater con PowerShell (%s), usando fallback .bat...", e_ps)
+            logger.warning(
+                "No se pudo iniciar updater con PowerShell (%s), usando fallback .bat...",
+                e_ps,
+            )
             updater_bat = Path(tempfile.gettempdir()) / f"ros2_updater_{pid}.bat"
             bat_content = f"""@echo off
 set PID={pid}
@@ -408,7 +478,11 @@ del "%~f0" > nul
 """
             try:
                 updater_bat.write_text(bat_content, encoding="utf-8")
-                creationflags = subprocess.CREATE_NO_WINDOW if platform.system().lower() == "windows" else 0
+                creationflags = (
+                    subprocess.CREATE_NO_WINDOW
+                    if platform.system().lower() == "windows"
+                    else 0
+                )
                 subprocess.Popen(
                     ["cmd.exe", "/c", str(updater_bat)],
                     creationflags=creationflags,
@@ -416,7 +490,7 @@ del "%~f0" > nul
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     close_fds=True,
-                    env=clean_env
+                    env=clean_env,
                 )
                 return True, "Reiniciando..."
             except Exception as e_bat:
@@ -444,7 +518,7 @@ rm -f "$0"
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                close_fds=True
+                close_fds=True,
             )
             return True, "Reiniciando..."
         except Exception as e:
@@ -456,7 +530,7 @@ def download_and_extract_zip_update(
     download_url: str,
     target_dir: Path,
     progress_cb: Callable[[float, str], None],
-    fallback_repo: str = DEFAULT_GITHUB_REPO
+    fallback_repo: str = DEFAULT_GITHUB_REPO,
 ) -> Tuple[bool, str]:
     """
     Modo Script / Desarrollo: Descarga y extrae archivos del repositorio sobrescribiendo los locales.
@@ -465,45 +539,80 @@ def download_and_extract_zip_update(
     candidate_urls = []
     if download_url and download_url.endswith(".zip"):
         candidate_urls.append(download_url)
-    candidate_urls.append(f"https://github.com/{fallback_repo}/archive/refs/heads/main.zip")
+    candidate_urls.append(
+        f"https://github.com/{fallback_repo}/archive/refs/heads/main.zip"
+    )
 
-    ok, msg = _download_file(candidate_urls, temp_zip, progress_cb, desc_label="código fuente (.zip)")
+    ok, msg = _download_file(
+        candidate_urls, temp_zip, progress_cb, desc_label="código fuente (.zip)"
+    )
     if not ok:
         return False, msg
 
     try:
         progress_cb(92.0, "Extrayendo archivos y aplicando cambios...")
         extracted_files = []
-        with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
+        with zipfile.ZipFile(temp_zip, "r") as zip_ref:
             namelist = zip_ref.namelist()
-            non_empty_items = [m.rstrip('/') for m in namelist if m.strip('/')]
-            top_parts = [p.split('/')[0] for p in non_empty_items if '/' in p]
-            has_single_root = bool(top_parts and all(p == top_parts[0] for p in [m.split('/')[0] for m in non_empty_items]))
+            non_empty_items = [m.rstrip("/") for m in namelist if m.strip("/")]
+            top_parts = [p.split("/")[0] for p in non_empty_items if "/" in p]
+            has_single_root = bool(
+                top_parts
+                and all(
+                    p == top_parts[0]
+                    for p in [m.split("/")[0] for m in non_empty_items]
+                )
+            )
             root_prefix = f"{top_parts[0]}/" if has_single_root else ""
 
             for member in namelist:
-                if member.endswith('/'):
+                if member.endswith("/"):
                     continue
 
-                rel_path_str = member[len(root_prefix):] if (has_single_root and member.startswith(root_prefix)) else member
+                rel_path_str = (
+                    member[len(root_prefix) :]
+                    if (has_single_root and member.startswith(root_prefix))
+                    else member
+                )
                 if not rel_path_str:
                     continue
 
                 rel_path = Path(rel_path_str)
                 if rel_path.is_absolute() or ".." in rel_path.parts:
                     continue
-                if any(part.startswith('.') for part in rel_path.parts) or "__pycache__" in rel_path.parts:
+                if (
+                    any(part.startswith(".") for part in rel_path.parts)
+                    or "__pycache__" in rel_path.parts
+                ):
                     continue
 
                 filename = rel_path.name
                 allowed_extensions = (
-                    ".py", ".json", ".ico", ".png", ".jpg", ".jpeg", ".svg",
-                    ".md", ".sh", ".bash", ".yaml", ".yml", ".txt", ".spec"
+                    ".py",
+                    ".json",
+                    ".ico",
+                    ".png",
+                    ".jpg",
+                    ".jpeg",
+                    ".svg",
+                    ".md",
+                    ".sh",
+                    ".bash",
+                    ".yaml",
+                    ".yml",
+                    ".txt",
+                    ".spec",
                 )
-                if filename.endswith(allowed_extensions) or filename in ("Dockerfile", "docker-compose.yml"):
+                if filename.endswith(allowed_extensions) or filename in (
+                    "Dockerfile",
+                    "docker-compose.yml",
+                ):
                     dest_file = target_dir / rel_path
                     dest_file.parent.mkdir(parents=True, exist_ok=True)
-                    with zip_ref.open(member) as source, open(dest_file, "wb") as target:
+                    with (
+                        zip_ref.open(member) as source,
+                        open(dest_file, "wb") as target,
+                    ):
                         target.write(source.read())
                     extracted_files.append(str(rel_path))
 
@@ -565,7 +674,7 @@ class UpdateModalDialog(QtWidgets.QDialog):
         parent: Optional[QtWidgets.QWidget],
         update_info: Dict[str, Any],
         target_dir: Path,
-        is_forced: bool = False
+        is_forced: bool = False,
     ):
         super().__init__(parent)
         self.update_info = update_info
@@ -573,7 +682,9 @@ class UpdateModalDialog(QtWidgets.QDialog):
         self.is_forced = is_forced
         self.download_url = update_info.get("download_url", "")
         self.remote_version = update_info.get("version", "desconocida")
-        self.changelog = update_info.get("changelog", "Mejoras generales y corrección de errores.")
+        self.changelog = update_info.get(
+            "changelog", "Mejoras generales y corrección de errores."
+        )
         self.release_date = update_info.get("release_date", "")
 
         if self.is_forced:
@@ -587,6 +698,7 @@ class UpdateModalDialog(QtWidgets.QDialog):
         # Configurar icono nativo
         try:
             from embedded_icon import get_app_icon_path
+
             ico_p = get_app_icon_path()
             if ico_p and ico_p.is_file():
                 self.setWindowIcon(QtGui.QIcon(str(ico_p)))
@@ -648,7 +760,9 @@ class UpdateModalDialog(QtWidgets.QDialog):
         main_layout.addWidget(self.prog_bar)
 
         if self.is_forced:
-            status_text = "¿Deseas descargar y forzar la reinstalación de esta versión ahora?"
+            status_text = (
+                "¿Deseas descargar y forzar la reinstalación de esta versión ahora?"
+            )
             btn_title = "Forzar actualización y reiniciar"
         else:
             status_text = "¿Deseas descargar e instalar esta actualización ahora?"
@@ -671,7 +785,13 @@ class UpdateModalDialog(QtWidgets.QDialog):
 
         self.btn_update = QtWidgets.QPushButton(btn_title)
         self.btn_update.setObjectName("btnUpdate")
-        self.btn_update.setIcon(get_themed_icon("system-software-update", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_ArrowDown))
+        self.btn_update.setIcon(
+            get_themed_icon(
+                "system-software-update",
+                color="#ffffff",
+                fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_ArrowDown,
+            )
+        )
         self.btn_update.setIconSize(QtCore.QSize(18, 18))
         self.btn_update.clicked.connect(self._start_update)
         btn_layout.addWidget(self.btn_update)
@@ -681,7 +801,9 @@ class UpdateModalDialog(QtWidgets.QDialog):
     def _apply_styles(self):
         is_dark = get_active_theme_mode()
         btn_later_icon_col = "#cbd5e1" if is_dark else "#475569"
-        self.btn_later.setIcon(get_themed_icon("window-close", color=btn_later_icon_col))
+        self.btn_later.setIcon(
+            get_themed_icon("window-close", color=btn_later_icon_col)
+        )
         self.setStyleSheet(build_dialog_stylesheet(is_dark, dialog_type="updater"))
 
     def _on_progress(self, pct: float, status_text: str):
@@ -695,23 +817,37 @@ class UpdateModalDialog(QtWidgets.QDialog):
     def _on_finished(self, success: bool, msg: str):
         if success:
             self.prog_bar.setValue(100)
-            self.lbl_status.setText("¡Actualización completada! Reiniciando launcher...")
+            self.lbl_status.setText(
+                "¡Actualización completada! Reiniciando launcher..."
+            )
             QtCore.QTimer.singleShot(1200, restart_application)
         else:
             self.btn_update.setEnabled(True)
             self.btn_update.setText("Reintentar actualización")
-            self.btn_update.setIcon(get_themed_icon("view-refresh", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
+            self.btn_update.setIcon(
+                get_themed_icon(
+                    "view-refresh",
+                    color="#ffffff",
+                    fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload,
+                )
+            )
             self.btn_later.setEnabled(True)
             QtWidgets.QMessageBox.critical(
                 self,
                 "Error de actualización",
-                f"No se pudo completar la actualización:\n\n{msg}"
+                f"No se pudo completar la actualización:\n\n{msg}",
             )
 
     def _start_update(self):
         self.btn_update.setEnabled(False)
         self.btn_update.setText("Actualizando...")
-        self.btn_update.setIcon(get_themed_icon("view-refresh", color="#ffffff", fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
+        self.btn_update.setIcon(
+            get_themed_icon(
+                "view-refresh",
+                color="#ffffff",
+                fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_BrowserReload,
+            )
+        )
         self.btn_later.setEnabled(False)
 
         signals = UpdateWorkerSignals()
@@ -722,8 +858,7 @@ class UpdateModalDialog(QtWidgets.QDialog):
             if is_running_frozen():
                 # En modo .exe congelado, descargar el nuevo ejecutable
                 ok, msg = download_and_apply_exe_update(
-                    self.download_url,
-                    lambda pct, txt: signals.progress.emit(pct, txt)
+                    self.download_url, lambda pct, txt: signals.progress.emit(pct, txt)
                 )
             else:
                 # En modo script: si se está forzando actualización y existe un .exe local,
@@ -733,18 +868,21 @@ class UpdateModalDialog(QtWidgets.QDialog):
                     local_exe = self.target_dir / "ros2_sim_launcher.exe"
 
                 if self.is_forced and local_exe.is_file():
-                    logger.info("Modo script con ejecutable local detectado: probando reemplazo en %s", local_exe)
+                    logger.info(
+                        "Modo script con ejecutable local detectado: probando reemplazo en %s",
+                        local_exe,
+                    )
                     ok, msg = download_and_apply_exe_update(
                         self.download_url,
                         lambda pct, txt: signals.progress.emit(pct, txt),
-                        target_exe=local_exe
+                        target_exe=local_exe,
                     )
                 else:
                     # En modo script habitual, extraer archivos al directorio de destino
                     ok, msg = download_and_extract_zip_update(
                         self.download_url,
                         self.target_dir,
-                        lambda pct, txt: signals.progress.emit(pct, txt)
+                        lambda pct, txt: signals.progress.emit(pct, txt),
                     )
             signals.finished.emit(ok, msg)
 

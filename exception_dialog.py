@@ -21,7 +21,9 @@ logger = logging.getLogger("launcher")
 SUPPORT_EMAIL = "javier.marina@salle.url.edu"
 
 
-def build_error_report(exc_type, exc_value, exc_tb, docker_info: Optional[str] = None) -> str:
+def build_error_report(
+    exc_type, exc_value, exc_tb, docker_info: Optional[str] = None
+) -> str:
     """
     Builds a detailed technical error report string from an exception.
     Pure function — testable without initializing a QApplication.
@@ -32,6 +34,7 @@ def build_error_report(exc_type, exc_value, exc_tb, docker_info: Optional[str] =
     if docker_info is None:
         try:
             from docker_service import DockerService
+
             docker_inst = "Sí" if DockerService.is_docker_installed() else "No"
             docker_run = "Sí" if DockerService.is_docker_running() else "No"
             docker_info = f"Instalado: {docker_inst} | En ejecución: {docker_run}"
@@ -71,7 +74,9 @@ class ExceptionModalDialog(QtWidgets.QDialog):
     the diagnostic report or email it directly to support.
     """
 
-    def __init__(self, exc_type, exc_value, exc_tb, parent: Optional[QtWidgets.QWidget] = None):
+    def __init__(
+        self, exc_type, exc_value, exc_tb, parent: Optional[QtWidgets.QWidget] = None
+    ):
         super().__init__(parent)
         self.exc_type = exc_type
         self.exc_value = exc_value
@@ -89,7 +94,9 @@ class ExceptionModalDialog(QtWidgets.QDialog):
         except Exception:
             pass
 
-        self.report_text = build_error_report(self.exc_type, self.exc_value, self.exc_tb)
+        self.report_text = build_error_report(
+            self.exc_type, self.exc_value, self.exc_tb
+        )
         self._build_ui()
         self._apply_styles()
 
@@ -106,18 +113,26 @@ class ExceptionModalDialog(QtWidgets.QDialog):
         h_layout.setSpacing(14)
 
         icon_label = QtWidgets.QLabel()
-        warn_icon = self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MessageBoxCritical)
+        warn_icon = self.style().standardIcon(
+            QtWidgets.QStyle.StandardPixmap.SP_MessageBoxCritical
+        )
         icon_label.setPixmap(warn_icon.pixmap(40, 40))
         icon_label.setFixedWidth(44)
         h_layout.addWidget(icon_label)
 
         text_layout = QtWidgets.QVBoxLayout()
         text_layout.setSpacing(3)
-        lbl_title = QtWidgets.QLabel("Se ha producido un error inesperado en la aplicación")
+        lbl_title = QtWidgets.QLabel(
+            "Se ha producido un error inesperado en la aplicación"
+        )
         lbl_title.setObjectName("errTitle")
 
         err_name = getattr(self.exc_type, "__name__", str(self.exc_type))
-        short_msg = str(self.exc_value).strip().splitlines()[0] if str(self.exc_value).strip() else "Sin descripción"
+        short_msg = (
+            str(self.exc_value).strip().splitlines()[0]
+            if str(self.exc_value).strip()
+            else "Sin descripción"
+        )
         lbl_summary = QtWidgets.QLabel(f"<b>{err_name}:</b> {short_msg[:120]}")
         lbl_summary.setObjectName("errSummary")
         lbl_summary.setWordWrap(True)
@@ -146,14 +161,18 @@ class ExceptionModalDialog(QtWidgets.QDialog):
 
         self.btn_copy = QtWidgets.QPushButton("  Copiar informe técnico")
         self.btn_copy.setObjectName("btnCopyReport")
-        copy_icon = self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_FileDialogDetailedView)
+        copy_icon = self.style().standardIcon(
+            QtWidgets.QStyle.StandardPixmap.SP_FileDialogDetailedView
+        )
         self.btn_copy.setIcon(copy_icon)
         self.btn_copy.clicked.connect(self._copy_to_clipboard)
         action_layout.addWidget(self.btn_copy)
 
         self.btn_email = QtWidgets.QPushButton("  Enviar a soporte por correo")
         self.btn_email.setObjectName("btnEmailReport")
-        email_icon = self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_DialogYesButton)
+        email_icon = self.style().standardIcon(
+            QtWidgets.QStyle.StandardPixmap.SP_DialogYesButton
+        )
         self.btn_email.setIcon(email_icon)
         self.btn_email.clicked.connect(self._send_email)
         action_layout.addWidget(self.btn_email)
@@ -193,7 +212,9 @@ class ExceptionModalDialog(QtWidgets.QDialog):
         )
         mailto_url = f"mailto:{SUPPORT_EMAIL}?subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
         QtGui.QDesktopServices.openUrl(QtCore.QUrl(mailto_url))
-        self.lbl_feedback.setText("Abriendo cliente de correo... Recuerda pegar el informe (Ctrl+V) antes de enviar.")
+        self.lbl_feedback.setText(
+            "Abriendo cliente de correo... Recuerda pegar el informe (Ctrl+V) antes de enviar."
+        )
 
 
 class GlobalExceptionDispatcher(QtCore.QObject):
@@ -201,12 +222,15 @@ class GlobalExceptionDispatcher(QtCore.QObject):
     Central exception dispatcher bridging unhandled exceptions from any thread
     to the Qt main GUI thread via a thread-safe QueuedConnection.
     """
+
     sig_exception = QtCore.Signal(object, object, object)
 
     def __init__(self):
         super().__init__()
         self._active = False
-        self.sig_exception.connect(self._on_exception, QtCore.Qt.ConnectionType.QueuedConnection)
+        self.sig_exception.connect(
+            self._on_exception, QtCore.Qt.ConnectionType.QueuedConnection
+        )
 
     @QtCore.Slot(object, object, object)
     def _on_exception(self, exc_type, exc_value, exc_tb):
@@ -236,7 +260,9 @@ def _global_excepthook(exc_type, exc_value, exc_tb):
         sys.__excepthook__(exc_type, exc_value, exc_tb)
         return
 
-    logger.critical("Excepción no controlada capturada:", exc_info=(exc_type, exc_value, exc_tb))
+    logger.critical(
+        "Excepción no controlada capturada:", exc_info=(exc_type, exc_value, exc_tb)
+    )
 
     if _global_dispatcher is not None:
         _global_dispatcher.sig_exception.emit(exc_type, exc_value, exc_tb)
@@ -270,5 +296,6 @@ def setup_global_exception_handler() -> GlobalExceptionDispatcher:
     _global_dispatcher = GlobalExceptionDispatcher()
     sys.excepthook = _global_excepthook
     import threading
+
     threading.excepthook = _thread_excepthook
     return _global_dispatcher

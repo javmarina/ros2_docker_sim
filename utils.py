@@ -26,6 +26,7 @@ logger = logging.getLogger("launcher")
 # Process Runner (QThread wrapper for streaming subprocess output)
 # ---------------------------------------------------------------------------
 
+
 class ProcessRunnerSignals(QtCore.QObject):
     line_received = QtCore.Signal(str)
     progress_changed = QtCore.Signal(float, str)
@@ -43,7 +44,9 @@ class ProcessRunnerThread(QtCore.QThread):
 
     def run(self):
         try:
-            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            creationflags = (
+                subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            )
             self.proc = subprocess.Popen(
                 self.cmd,
                 cwd=self.cwd,
@@ -54,9 +57,9 @@ class ProcessRunnerThread(QtCore.QThread):
                 errors="replace",
                 bufsize=1,
                 universal_newlines=True,
-                creationflags=creationflags
+                creationflags=creationflags,
             )
-            for line in iter(self.proc.stdout.readline, ''):
+            for line in iter(self.proc.stdout.readline, ""):
                 self.signals.line_received.emit(line)
             self.proc.stdout.close()
             rc = self.proc.wait()
@@ -76,16 +79,27 @@ class ProcessRunnerThread(QtCore.QThread):
 # ANSI escape code parser for QTextEdit (renders colors in log console)
 # ---------------------------------------------------------------------------
 
+
 class AnsiColorParser:
     ANSI_MAP = {
-        30: QtGui.QColor("#4f5666"), 31: QtGui.QColor("#e06c75"), 32: QtGui.QColor("#98c379"),
-        33: QtGui.QColor("#e5c07b"), 34: QtGui.QColor("#61afef"), 35: QtGui.QColor("#c678dd"),
-        36: QtGui.QColor("#56b6c2"), 37: QtGui.QColor("#abb2bf"),
-        90: QtGui.QColor("#5c6370"), 91: QtGui.QColor("#ff6c6b"), 92: QtGui.QColor("#98be65"),
-        93: QtGui.QColor("#da8548"), 94: QtGui.QColor("#51afef"), 95: QtGui.QColor("#a9a1e1"),
-        96: QtGui.QColor("#46d9ff"), 97: QtGui.QColor("#ffffff"),
+        30: QtGui.QColor("#4f5666"),
+        31: QtGui.QColor("#e06c75"),
+        32: QtGui.QColor("#98c379"),
+        33: QtGui.QColor("#e5c07b"),
+        34: QtGui.QColor("#61afef"),
+        35: QtGui.QColor("#c678dd"),
+        36: QtGui.QColor("#56b6c2"),
+        37: QtGui.QColor("#abb2bf"),
+        90: QtGui.QColor("#5c6370"),
+        91: QtGui.QColor("#ff6c6b"),
+        92: QtGui.QColor("#98be65"),
+        93: QtGui.QColor("#da8548"),
+        94: QtGui.QColor("#51afef"),
+        95: QtGui.QColor("#a9a1e1"),
+        96: QtGui.QColor("#46d9ff"),
+        97: QtGui.QColor("#ffffff"),
     }
-    REGEX = re.compile(r'(\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\))')
+    REGEX = re.compile(r"(\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\))")
 
     def __init__(self, default_color: QtGui.QColor = QtGui.QColor("#e4e4e7")):
         self.default_color = default_color
@@ -96,9 +110,13 @@ class AnsiColorParser:
         for token in self.REGEX.split(text):
             if not token:
                 continue
-            if token.startswith('\x1b['):
-                if token.endswith('m'):
-                    params = [int(p) for p in token[2:-1].split(';') if p] if token[2:-1] else [0]
+            if token.startswith("\x1b["):
+                if token.endswith("m"):
+                    params = (
+                        [int(p) for p in token[2:-1].split(";") if p]
+                        if token[2:-1]
+                        else [0]
+                    )
                     for code in params:
                         if code == 0:
                             self.current_format = QtGui.QTextCharFormat()
@@ -111,10 +129,10 @@ class AnsiColorParser:
                             self.current_format.setForeground(self.ANSI_MAP[code])
                         elif code == 39:
                             self.current_format.setForeground(self.default_color)
-            elif token.startswith('\x1b'):
+            elif token.startswith("\x1b"):
                 pass  # Ignore other escape sequences (e.g. OSC)
             else:
-                clean = token.replace('\x07', '')
+                clean = token.replace("\x07", "")
                 if clean:
                     cursor.insertText(clean, self.current_format)
 
@@ -136,7 +154,9 @@ def get_connected_ssid() -> Optional[str]:
             try:
                 out = subprocess.check_output(
                     ["netsh", "wlan", "show", "interfaces"],
-                    text=True, stderr=subprocess.DEVNULL, creationflags=_NO_WINDOW
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=_NO_WINDOW,
                 )
                 for line in out.splitlines():
                     if "SSID" in line and "BSSID" not in line:
@@ -148,8 +168,15 @@ def get_connected_ssid() -> Optional[str]:
             # Fallback to PowerShell
             try:
                 output = subprocess.check_output(
-                    ["powershell", "-NoProfile", "-Command", "Get-NetConnectionProfile"],
-                    text=True, stderr=subprocess.DEVNULL, creationflags=_NO_WINDOW
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-Command",
+                        "Get-NetConnectionProfile",
+                    ],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=_NO_WINDOW,
                 )
                 for line in output.splitlines():
                     if ":" in line:
@@ -159,15 +186,23 @@ def get_connected_ssid() -> Optional[str]:
             except Exception:
                 pass
         elif sys.platform == "darwin":
-            cmd = ["/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport", "-I"]
+            cmd = [
+                "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport",
+                "-I",
+            ]
             out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
             for line in out.splitlines():
                 if "SSID:" in line and "BSSID" not in line:
                     return line.split(":", 1)[1].strip()
         else:
-            for cmd in [["iwgetid", "-r"], ["nmcli", "-t", "-f", "active,ssid", "dev", "wifi"]]:
+            for cmd in [
+                ["iwgetid", "-r"],
+                ["nmcli", "-t", "-f", "active,ssid", "dev", "wifi"],
+            ]:
                 try:
-                    out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
+                    out = subprocess.check_output(
+                        cmd, text=True, stderr=subprocess.DEVNULL
+                    )
                     lines = [l.strip() for l in out.splitlines() if l.strip()]
                     if lines:
                         if cmd[0] == "nmcli":
@@ -203,7 +238,10 @@ def get_ip_from_mac(target_mac: str) -> Optional[str]:
     target_mac = target_mac.lower().replace("-", ":").strip()
     try:
         output = subprocess.check_output(
-            ["arp", "-a"], text=True, stderr=subprocess.DEVNULL, creationflags=_NO_WINDOW
+            ["arp", "-a"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            creationflags=_NO_WINDOW,
         )
         for line in output.splitlines():
             if target_mac in line.lower().replace("-", ":"):
@@ -222,10 +260,15 @@ def ping_device(ip_address: str, timeout: float = 1.0) -> bool:
     try:
         param = "-n" if sys.platform == "win32" else "-c"
         w_param = "-w" if sys.platform == "win32" else "-W"
-        ms = str(int(timeout * 1000)) if sys.platform == "win32" else str(max(1, int(timeout)))
+        ms = (
+            str(int(timeout * 1000))
+            if sys.platform == "win32"
+            else str(max(1, int(timeout)))
+        )
         subprocess.check_output(
             ["ping", param, "1", w_param, ms, ip_address],
-            stderr=subprocess.DEVNULL, creationflags=_NO_WINDOW
+            stderr=subprocess.DEVNULL,
+            creationflags=_NO_WINDOW,
         )
         return True
     except Exception:
@@ -244,14 +287,20 @@ def subnet_sweep(local_ip: str, timeout: float = 0.35) -> None:
 
         param = "-n" if sys.platform == "win32" else "-c"
         w_param = "-w" if sys.platform == "win32" else "-W"
-        ms = str(int(timeout * 1000)) if sys.platform == "win32" else str(max(1, int(timeout)))
+        ms = (
+            str(int(timeout * 1000))
+            if sys.platform == "win32"
+            else str(max(1, int(timeout)))
+        )
 
         def _ping(ip):
             try:
                 subprocess.run(
                     ["ping", param, "1", w_param, ms, ip],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    check=False, creationflags=_NO_WINDOW
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    creationflags=_NO_WINDOW,
                 )
             except Exception:
                 pass
@@ -266,7 +315,17 @@ def subnet_sweep(local_ip: str, timeout: float = 0.35) -> None:
 # SFTP recursive upload
 # ---------------------------------------------------------------------------
 
-_SFTP_IGNORE_DIRS = {".git", ".svn", "build", "install", "log", "__pycache__", ".vscode", ".idea", ".DS_Store"}
+_SFTP_IGNORE_DIRS = {
+    ".git",
+    ".svn",
+    "build",
+    "install",
+    "log",
+    "__pycache__",
+    ".vscode",
+    ".idea",
+    ".DS_Store",
+}
 
 
 def sftp_upload_dir(sftp, local_dir: Path, remote_dir: str, log_cb=None) -> int:
@@ -291,7 +350,9 @@ def sftp_upload_dir(sftp, local_dir: Path, remote_dir: str, log_cb=None) -> int:
     local_p = Path(local_dir).resolve()
 
     for root, dirs, files in os.walk(local_p):
-        dirs[:] = [d for d in dirs if d not in _SFTP_IGNORE_DIRS and not d.startswith(".")]
+        dirs[:] = [
+            d for d in dirs if d not in _SFTP_IGNORE_DIRS and not d.startswith(".")
+        ]
         rel = os.path.relpath(root, local_p).replace("\\", "/")
         dest_sub = remote_dir if rel == "." else f"{remote_dir}/{rel}"
         _remote_mkdir_p(dest_sub)
@@ -314,8 +375,10 @@ def sftp_upload_dir(sftp, local_dir: Path, remote_dir: str, log_cb=None) -> int:
 # Robot SSH terminal launcher (platform-specific, no Qt dependency)
 # ---------------------------------------------------------------------------
 
+
 def _cleanup_temp_file(fpath: str, delay: float = 15.0):
     """Deletes a temp file after a delay, in a background thread."""
+
     def _worker():
         time.sleep(delay)
         try:
@@ -323,6 +386,7 @@ def _cleanup_temp_file(fpath: str, delay: float = 15.0):
                 os.remove(fpath)
         except Exception:
             pass
+
     threading.Thread(target=_worker, daemon=True).start()
 
 
@@ -365,7 +429,7 @@ def open_robot_ssh_terminal(
         if password:
             askpass_path = os.path.join(
                 tempfile.gettempdir(),
-                f"tb4_askpass_{os.getpid()}_{int(time.time() * 1000)}.cmd"
+                f"tb4_askpass_{os.getpid()}_{int(time.time() * 1000)}.cmd",
             )
             with open(askpass_path, "w", encoding="utf-8") as f:
                 f.write(f"@echo off\r\necho {password.replace('%', '%%')}\r\n")
@@ -388,7 +452,7 @@ def open_robot_ssh_terminal(
         if password:
             askpass_path = os.path.join(
                 tempfile.gettempdir(),
-                f"tb4_askpass_{os.getpid()}_{int(time.time() * 1000)}.sh"
+                f"tb4_askpass_{os.getpid()}_{int(time.time() * 1000)}.sh",
             )
             with open(askpass_path, "w", encoding="utf-8") as f:
                 f.write(f"#!/bin/sh\necho '{password}'\n")
@@ -413,7 +477,7 @@ def open_robot_ssh_terminal(
         elif password:
             askpass_path = os.path.join(
                 tempfile.gettempdir(),
-                f"tb4_askpass_{os.getpid()}_{int(time.time() * 1000)}.sh"
+                f"tb4_askpass_{os.getpid()}_{int(time.time() * 1000)}.sh",
             )
             with open(askpass_path, "w", encoding="utf-8") as f:
                 f.write(f"#!/bin/sh\necho '{password}'\n")
@@ -426,12 +490,24 @@ def open_robot_ssh_terminal(
         else:
             ssh_cmd = f"ssh -o StrictHostKeyChecking=no {port_opt} -t {user}@{ip} '{remote_init_cmd}'"
 
-        for term in ["x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"]:
+        for term in [
+            "x-terminal-emulator",
+            "gnome-terminal",
+            "konsole",
+            "xfce4-terminal",
+            "xterm",
+        ]:
             if shutil.which(term):
-                subprocess.Popen([term, "-e", f"bash -c \"{ssh_cmd}\""])
-                return True, f"Terminal SSH lanzada para {user}@{ip} (Linux, {auth_mode})"
+                subprocess.Popen([term, "-e", f'bash -c "{ssh_cmd}"'])
+                return (
+                    True,
+                    f"Terminal SSH lanzada para {user}@{ip} (Linux, {auth_mode})",
+                )
 
-        return False, "No se encontró ningún emulador de terminal compatible en el sistema."
+        return (
+            False,
+            "No se encontró ningún emulador de terminal compatible en el sistema.",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -544,12 +620,16 @@ def ensure_dockerfile_sync(workspace_dir: Path) -> Path:
     if label_line not in effective_content:
         cmd_marker = 'CMD ["/bin/bash"]'
         if cmd_marker in effective_content:
-            effective_content = effective_content.replace(cmd_marker, f'{label_line}\n\n{cmd_marker}')
+            effective_content = effective_content.replace(
+                cmd_marker, f"{label_line}\n\n{cmd_marker}"
+            )
         else:
-            effective_content += f'\n{label_line}\n'
+            effective_content += f"\n{label_line}\n"
 
     try:
-        current = target_file.read_text(encoding="utf-8") if target_file.exists() else ""
+        current = (
+            target_file.read_text(encoding="utf-8") if target_file.exists() else ""
+        )
         if current.strip() != effective_content.strip():
             target_file.write_text(effective_content, encoding="utf-8")
     except Exception as e:

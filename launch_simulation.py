@@ -13,7 +13,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
-    datefmt="%H:%M:%S"
+    datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("launcher")
 
@@ -21,6 +21,7 @@ logger = logging.getLogger("launcher")
 if sys.platform == "win32":
     try:
         import ctypes
+
         app_id = "lasalle.sistemasdenavegacion.ros2launcher.v107"
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
     except Exception:
@@ -29,10 +30,7 @@ if sys.platform == "win32":
 # Módulos del proyecto
 from main_window import ModernSimulationLauncher
 from theme import THEME_PALETTES, is_dark_mode, apply_theme_to_application
-from exception_dialog import (
-    setup_global_exception_handler,
-    _global_excepthook
-)
+from exception_dialog import setup_global_exception_handler, _global_excepthook
 from embedded_icon import get_app_icon_path
 
 
@@ -65,10 +63,15 @@ def main():
         if sys.platform == "win32" and ico_path and ico_path.is_file():
             try:
                 import ctypes
+
                 hwnd = int(window.winId())
                 ico_str = str(ico_path)
-                hicon_big = ctypes.windll.user32.LoadImageW(None, ico_str, 1, 32, 32, 0x00000010)
-                hicon_small = ctypes.windll.user32.LoadImageW(None, ico_str, 1, 16, 16, 0x00000010)
+                hicon_big = ctypes.windll.user32.LoadImageW(
+                    None, ico_str, 1, 32, 32, 0x00000010
+                )
+                hicon_small = ctypes.windll.user32.LoadImageW(
+                    None, ico_str, 1, 16, 16, 0x00000010
+                )
                 if hicon_big:
                     ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 1, hicon_big)
                 if hicon_small:

@@ -36,7 +36,7 @@ class ConfigStore:
         "robot_user": "ubuntu",
         "robot_password": "turtlebot4",
         "robot_port": "22",
-        "robot_remote_ws": "~/turtlebot4_ws"
+        "robot_remote_ws": "~/turtlebot4_ws",
     }
 
     def __init__(self, fallback_dir: Optional[Path] = None):
@@ -56,7 +56,9 @@ class ConfigStore:
                 else:
                     base_dir = Path.home() / "AppData" / "Roaming" / self.APP_DIR_NAME
             elif "darwin" in system:
-                base_dir = Path.home() / "Library" / "Application Support" / self.APP_DIR_NAME
+                base_dir = (
+                    Path.home() / "Library" / "Application Support" / self.APP_DIR_NAME
+                )
             else:
                 # Linux u otros POSIX
                 xdg_config = os.getenv("XDG_CONFIG_HOME")
@@ -78,7 +80,7 @@ class ConfigStore:
     def load(self) -> Dict[str, Any]:
         """Carga la configuración desde el archivo JSON o crea una con los valores por defecto."""
         self._data = dict(self.DEFAULTS)
-        
+
         # Si no hay workspace_path configurado, usar por defecto la carpeta del script
         if not self._data["workspace_path"]:
             self._data["workspace_path"] = str(self._fallback_dir)
@@ -159,10 +161,15 @@ class ConfigStore:
         try:
             has_src = (p / "src").is_dir()
             has_direct_package = (p / "package.xml").exists()
-            has_sub_packages = any(p.glob("*/package.xml")) or (has_src and any((p / "src").glob("*/package.xml")))
+            has_sub_packages = any(p.glob("*/package.xml")) or (
+                has_src and any((p / "src").glob("*/package.xml"))
+            )
 
             if has_src and any((p / "src").glob("*/package.xml")):
-                return True, "Workspace ROS 2 detectado (contiene carpeta src/ con paquetes)."
+                return (
+                    True,
+                    "Workspace ROS 2 detectado (contiene carpeta src/ con paquetes).",
+                )
             elif has_direct_package or has_sub_packages:
                 return True, "Paquetes ROS 2 detectados en la carpeta."
             else:

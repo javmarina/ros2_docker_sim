@@ -28,7 +28,7 @@ from robot_registry import (
     get_robot_by_id,
     SimulationWorld,
     ScenarioId,
-    RobotId
+    RobotId,
 )
 
 
@@ -84,7 +84,9 @@ def test_exception_report_builder():
         raise ValueError("Test calculation fault: divide by zero")
     except ValueError as err:
         exc_type, exc_val, exc_tb = sys.exc_info()
-        report = exception_dialog.build_error_report(exc_type, exc_val, exc_tb, docker_info="Instalado: Sí | En ejecución: No")
+        report = exception_dialog.build_error_report(
+            exc_type, exc_val, exc_tb, docker_info="Instalado: Sí | En ejecución: No"
+        )
 
     assert "INFORME DE ERROR - ROS 2 SIMULATION LAUNCHER" in report
     assert "ValueError" in report
@@ -198,7 +200,9 @@ def test_config_store_workspace_validation():
     """Validates ConfigStore workspace path check logic."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Non-existent path
-        valid, msg = ConfigStore.validate_workspace(str(Path(tmp_dir) / "does_not_exist"))
+        valid, msg = ConfigStore.validate_workspace(
+            str(Path(tmp_dir) / "does_not_exist")
+        )
         assert not valid
 
         # Empty directory
@@ -255,7 +259,10 @@ def test_dialog_stylesheets_and_variants():
 
         pm_term = QtGui.QPixmap(win.btn_terminal.size())
         win.btn_terminal.render(pm_term)
-        assert QtGui.QColor(pm_term.toImage().pixel(10, 10)).name() in ("#0f172a", "#1e293b")
+        assert QtGui.QColor(pm_term.toImage().pixel(10, 10)).name() in (
+            "#0f172a",
+            "#1e293b",
+        )
 
         win._set_button_variant(win.btn_header_update, "success")
         assert win.btn_header_update.property("variant") == "success"
@@ -349,7 +356,9 @@ def test_config_store_world_fallback():
     """Validates that any obsolete world, robot, or scenario previously saved in settings defaults safely."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         config_file = Path(tmp_dir) / "config.json"
-        config_file.write_text(json.dumps({"world_name": "warehouse"}), encoding="utf-8")
+        config_file.write_text(
+            json.dumps({"world_name": "warehouse"}), encoding="utf-8"
+        )
         store = ConfigStore(fallback_dir=Path(tmp_dir))
         store._config_path = config_file
         store.load()
@@ -368,12 +377,17 @@ def test_config_store_world_fallback():
         store.load()
         assert store.get("world_name") == SimulationWorld.WALL.value
 
-        config_file.write_text(json.dumps({"world_name": "classroom"}), encoding="utf-8")
+        config_file.write_text(
+            json.dumps({"world_name": "classroom"}), encoding="utf-8"
+        )
         store.load()
         assert store.get("world_name") == SimulationWorld.CLASSROOM.value
 
         # Fallback for invalid robot_id and scenario_id
-        config_file.write_text(json.dumps({"robot_id": "invalid_bot", "scenario_id": "invalid_sc"}), encoding="utf-8")
+        config_file.write_text(
+            json.dumps({"robot_id": "invalid_bot", "scenario_id": "invalid_sc"}),
+            encoding="utf-8",
+        )
         store.load()
         assert store.get("robot_id") == RobotId.BASE.value
         assert store.get("scenario_id") == ScenarioId.CONTAINER_ONLY.value
@@ -402,7 +416,9 @@ def test_docker_startup_progress_timer():
         # Emulate timer tick
         win._on_docker_progress_tick()
         QtWidgets.QApplication.processEvents()
-        assert "5s" in win.lbl_docker_badge.text() or "6s" in win.lbl_docker_badge.text()
+        assert (
+            "5s" in win.lbl_docker_badge.text() or "6s" in win.lbl_docker_badge.text()
+        )
 
         # 3. State transition to RUNNING should stop the progress timer
         win._set_docker_state(DockerState.RUNNING)
@@ -475,6 +491,7 @@ def test_docker_service_detection():
 def test_docker_command_length_windows_limits():
     """Verifica que ningún comando de Docker generado supere el límite de Windows CreateProcess (32,767 caracteres)."""
     from docker_service import DockerService
+
     max_len = 0
     worst_case = ""
     for robot in get_all_robots():
@@ -482,7 +499,12 @@ def test_docker_command_length_windows_limits():
             for sc in robot.scenarios:
                 cmd = robot.build_command(sc.id, world)
                 docker_cmd = DockerService.build_docker_run_args(
-                    "ros2-jazzy-nav-course:latest", "test_container", cmd, "42", robot.id, "C:/fake/ws"
+                    "ros2-jazzy-nav-course:latest",
+                    "test_container",
+                    cmd,
+                    "42",
+                    robot.id,
+                    "C:/fake/ws",
                 )
                 cmd_str = " ".join(docker_cmd)
                 length = len(cmd_str)
@@ -490,10 +512,14 @@ def test_docker_command_length_windows_limits():
                     max_len = length
                     worst_case = f"{robot.id} / {world} / {sc.id}"
                 # Must be strictly below Windows CreateProcessW 32,767 character ceiling
-                assert length < 32767, f"Comando demasiado largo ({length} caracteres) para {worst_case}"
+                assert length < 32767, (
+                    f"Comando demasiado largo ({length} caracteres) para {worst_case}"
+                )
 
     # Incluso en el peor caso (classroom con mapas y launch sin dock), debe ser < 20,000 chars
-    assert max_len < 20000, f"El peor caso ({worst_case}) es {max_len} caracteres, esperado < 20000"
+    assert max_len < 20000, (
+        f"El peor caso ({worst_case}) es {max_len} caracteres, esperado < 20000"
+    )
 
 
 def test_dialog_and_message_box_dark_mode():
@@ -523,7 +549,9 @@ def test_dialog_and_message_box_dark_mode():
 
         label_dark = msg_dark.findChild(QtWidgets.QLabel, "qt_msgbox_label")
         assert label_dark is not None
-        assert label_dark.palette().color(label_dark.foregroundRole()).name() == "#f8fafc"
+        assert (
+            label_dark.palette().color(label_dark.foregroundRole()).name() == "#f8fafc"
+        )
     finally:
         msg_dark.close()
 
@@ -541,7 +569,10 @@ def test_dialog_and_message_box_dark_mode():
 
         label_light = msg_light.findChild(QtWidgets.QLabel, "qt_msgbox_label")
         assert label_light is not None
-        assert label_light.palette().color(label_light.foregroundRole()).name() == "#0f172a"
+        assert (
+            label_light.palette().color(label_light.foregroundRole()).name()
+            == "#0f172a"
+        )
     finally:
         msg_light.close()
 
@@ -579,6 +610,3 @@ if __name__ == "__main__":
     test_dialog_and_message_box_dark_mode()
     print("[OK] test_dialog_and_message_box_dark_mode passed")
     print("\nAll 15 test suites passed successfully!")
-
-
-
