@@ -13,9 +13,9 @@ import shutil
 import socket
 import subprocess
 import sys
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("docker_service")
 
@@ -180,7 +180,7 @@ class DockerService:
                     return
 
     @classmethod
-    def check_docker_installed(cls, timeout: float = 4.0) -> Tuple[bool, str]:
+    def check_docker_installed(cls, timeout: float = 4.0) -> tuple[bool, str]:
         """Comprueba si el binario de docker está instalado y en el PATH."""
         cls.ensure_docker_in_path()
         try:
@@ -306,7 +306,7 @@ class DockerService:
             return True
 
     @classmethod
-    def get_docker_status(cls, timeout: float = 2.5) -> Tuple[DockerState, str]:
+    def get_docker_status(cls, timeout: float = 2.5) -> tuple[DockerState, str]:
         """
         Determina de forma rápida, robusta y tipada el estado del servicio Docker
         (RUNNING, STARTING, NOT_RUNNING) junto con un mensaje descriptivo.
@@ -364,7 +364,7 @@ class DockerService:
             return DockerState.NOT_RUNNING, str(e)
 
     @classmethod
-    def check_docker_running(cls, timeout: float = 2.5) -> Tuple[bool, str]:
+    def check_docker_running(cls, timeout: float = 2.5) -> tuple[bool, str]:
         """
         Comprueba de forma rápida si el daemon de Docker está activo.
         Mantiene compatibilidad devolviendo (bool, str).
@@ -394,7 +394,7 @@ class DockerService:
         return state
 
     @classmethod
-    def find_docker_desktop_path(cls) -> Optional[Path]:
+    def find_docker_desktop_path(cls) -> Path | None:
         """Busca la ruta del ejecutable de Docker Desktop en el sistema."""
         host_os = cls.get_host_os()
         if host_os == "windows":
@@ -446,7 +446,7 @@ class DockerService:
         return None
 
     @staticmethod
-    def _find_docker_in_windows_registry() -> Optional[Path]:
+    def _find_docker_in_windows_registry() -> Path | None:
         """Consulta directa en el registro de desinstalación de Windows."""
         try:
             import winreg
@@ -470,7 +470,7 @@ class DockerService:
         return None
 
     @classmethod
-    def start_docker_desktop(cls) -> Tuple[bool, str]:
+    def start_docker_desktop(cls) -> tuple[bool, str]:
         """
         Inicia Docker Desktop en el sistema anfitrión si no está corriendo.
         Retorna (éxito, mensaje).
@@ -603,7 +603,7 @@ class DockerService:
     @staticmethod
     def get_image_label(
         image_name: str, label_name: str, timeout: float = 5.0
-    ) -> Optional[str]:
+    ) -> str | None:
         """Obtiene el valor de una etiqueta de metadatos de una imagen Docker."""
         try:
             cmd = [
@@ -634,7 +634,7 @@ class DockerService:
         cls,
         image_name: str = COURSE_IMAGE_NAME,
         expected_hash: str = "",
-        fallback_hash: Optional[str] = None,
+        fallback_hash: str | None = None,
     ) -> bool:
         """
         Verifica si la imagen Docker local existe y contiene todas las capas esperadas.
@@ -660,7 +660,7 @@ class DockerService:
     @staticmethod
     def stop_container(
         container_name: str = DEFAULT_CONTAINER_NAME, timeout: float = 15.0
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """Detiene y elimina de forma inmediata el contenedor para evitar bloqueos."""
         logger.info("Deteniendo contenedor '%s'...", container_name)
         try:
@@ -685,7 +685,7 @@ class DockerService:
             return False, str(e)
 
     @staticmethod
-    def clean_build_volumes(timeout: float = 10.0) -> Tuple[bool, str]:
+    def clean_build_volumes(timeout: float = 10.0) -> tuple[bool, str]:
         """Elimina los volúmenes persistentes de caché de compilación de colcon."""
         logger.info("Eliminando volúmenes de caché ros2_jazzy_*...")
         try:
@@ -712,7 +712,7 @@ class DockerService:
     @classmethod
     def open_container_terminal(
         cls, container_name: str = DEFAULT_CONTAINER_NAME
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """
         Abre una terminal interactiva nativa conectada al contenedor con el entorno ROS 2 ya cargado.
         """
@@ -802,7 +802,7 @@ class DockerService:
     @classmethod
     def get_container_exec_args(
         cls, container_name: str, command_str: str
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Construye la lista de argumentos para ejecutar un comando dentro del contenedor
         cargando de forma segura el entorno de ROS 2 y el workspace.
@@ -817,7 +817,7 @@ class DockerService:
     @classmethod
     def execute_in_container_stream(
         cls, container_name: str, command_str: str, log_cb: Callable[[str], None]
-    ) -> Optional[subprocess.Popen]:
+    ) -> subprocess.Popen | None:
         """
         Ejecuta un comando no interactivo dentro del contenedor y transmite su salida.
         Útil para botones de comandos rápidos (ros2 topic list, colcon build, etc.).
@@ -851,7 +851,7 @@ class DockerService:
         robot_model: str,
         ws_path: str,
         web_port: str = "6080",
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Construye la lista de argumentos para ejecutar el contenedor de simulación
         garantizando un montaje de volúmenes seguro en Windows y variables de visualización virtual.
@@ -923,7 +923,7 @@ class DockerService:
         image_name: str,
         progress_cb: Callable[[float, str], None],
         log_cb: Callable[[str], None],
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """Descarga una imagen de Docker analizando el progreso capa a capa."""
         cmd = ["docker", "pull", image_name]
         log_cb(f"Ejecutando: {' '.join(cmd)}\n")
@@ -997,8 +997,8 @@ class DockerService:
         tag_name: str,
         progress_cb: Callable[[float, str], None],
         log_cb: Callable[[str], None],
-        labels: Optional[Dict[str, str]] = None,
-    ) -> Tuple[bool, str]:
+        labels: dict[str, str] | None = None,
+    ) -> tuple[bool, str]:
         """Construye una imagen Docker a partir de un Dockerfile con estimación de progreso y caché inteligente."""
         cmd = ["docker", "build", "--progress=plain", "-t", tag_name]
 

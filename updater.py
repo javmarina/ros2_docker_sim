@@ -16,11 +16,13 @@ import threading
 import urllib.error
 import urllib.request
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any
+
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from embedded_icon import get_themed_icon
-from PySide6 import QtCore, QtGui, QtWidgets
 from theme import build_dialog_stylesheet, get_active_theme_mode
 
 # Configurar logger para este módulo
@@ -67,7 +69,7 @@ def get_local_version() -> str:
         try:
             ver_file = Path(sys._MEIPASS) / "version.json"
             if ver_file.is_file():
-                with open(ver_file, "r", encoding="utf-8") as f:
+                with open(ver_file, encoding="utf-8") as f:
                     data = json.load(f)
                     ver = data.get("version")
                     if ver:
@@ -80,7 +82,7 @@ def get_local_version() -> str:
         try:
             ver_file = candidate_dir / "version.json"
             if ver_file.is_file():
-                with open(ver_file, "r", encoding="utf-8") as f:
+                with open(ver_file, encoding="utf-8") as f:
                     data = json.load(f)
                     ver = data.get("version")
                     if ver:
@@ -94,7 +96,7 @@ def get_local_version() -> str:
 CURRENT_VERSION = get_local_version()
 
 
-def parse_version(v_str: str) -> Tuple[int, ...]:
+def parse_version(v_str: str) -> tuple[int, ...]:
     """Convierte una cadena como 'v1.2.3' o '1.2' en una tupla de enteros (1, 2, 3) para comparar."""
     cleaned = v_str.strip().lstrip("v").lstrip("V")
     parts = []
@@ -127,7 +129,7 @@ def fetch_remote_version(
     version_url: str = DEFAULT_VERSION_URL,
     timeout: float = 3.0,
     repo: str = DEFAULT_GITHUB_REPO,
-) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+) -> tuple[bool, dict[str, Any] | None, str]:
     """
     Comprueba si hay una nueva versión en GitHub mediante HTTP GET.
     Prioriza la API directa de GitHub para evitar la caché CDN de raw.githubusercontent.com.
@@ -186,9 +188,9 @@ def fetch_remote_version(
 def check_for_updates(
     version_url: str = DEFAULT_VERSION_URL,
     timeout: float = 2.0,
-    local_ver: Optional[str] = None,
+    local_ver: str | None = None,
     force: bool = False,
-) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+) -> tuple[bool, dict[str, Any] | None, str]:
     """
     Función principal de comprobación:
     Retorna (hay_actualizacion_disponible, info_dict, mensaje)
@@ -222,7 +224,7 @@ def _download_file(
     dest_path: Path,
     progress_cb: Callable[[float, str], None],
     desc_label: str = "archivo",
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Descarga un archivo con barra de progreso intentando varias URLs alternativas."""
     response = None
     active_url = None
@@ -282,8 +284,8 @@ def download_and_apply_exe_update(
     download_url: str,
     progress_cb: Callable[[float, str], None],
     fallback_repo: str = DEFAULT_GITHUB_REPO,
-    target_exe: Optional[Path] = None,
-) -> Tuple[bool, str]:
+    target_exe: Path | None = None,
+) -> tuple[bool, str]:
     """
     Descarga el nuevo .exe de la versión y programa su sustitución al cerrar con entorno saneado.
     """
@@ -531,7 +533,7 @@ def download_and_extract_zip_update(
     target_dir: Path,
     progress_cb: Callable[[float, str], None],
     fallback_repo: str = DEFAULT_GITHUB_REPO,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """
     Modo Script / Desarrollo: Descarga y extrae archivos del repositorio sobrescribiendo los locales.
     """
@@ -671,8 +673,8 @@ class UpdateModalDialog(QtWidgets.QDialog):
 
     def __init__(
         self,
-        parent: Optional[QtWidgets.QWidget],
-        update_info: Dict[str, Any],
+        parent: QtWidgets.QWidget | None,
+        update_info: dict[str, Any],
         target_dir: Path,
         is_forced: bool = False,
     ):

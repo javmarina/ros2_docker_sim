@@ -8,7 +8,7 @@ import json
 import os
 import platform
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from robot_registry import RobotId, ScenarioId, SimulationWorld
 
@@ -20,7 +20,7 @@ class ConfigStore:
     CONFIG_FILE_NAME = "config.json"
 
     # Valores predeterminados seguros basados en Enums
-    DEFAULTS: Dict[str, Any] = {
+    DEFAULTS: dict[str, Any] = {
         "workspace_path": "",
         "robot_id": RobotId.BASE.value,
         "scenario_id": ScenarioId.CONTAINER_ONLY.value,
@@ -39,10 +39,10 @@ class ConfigStore:
         "robot_remote_ws": "~/turtlebot4_ws",
     }
 
-    def __init__(self, fallback_dir: Optional[Path] = None):
+    def __init__(self, fallback_dir: Path | None = None):
         self._fallback_dir = fallback_dir or Path(__file__).parent.resolve()
         self._config_path = self._resolve_config_path()
-        self._data: Dict[str, Any] = {}
+        self._data: dict[str, Any] = {}
         self.load()
 
     def _resolve_config_path(self) -> Path:
@@ -77,7 +77,7 @@ class ConfigStore:
     def config_path(self) -> Path:
         return self._config_path
 
-    def load(self) -> Dict[str, Any]:
+    def load(self) -> dict[str, Any]:
         """Carga la configuración desde el archivo JSON o crea una con los valores por defecto."""
         self._data = dict(self.DEFAULTS)
 
@@ -87,7 +87,7 @@ class ConfigStore:
 
         if self._config_path.exists():
             try:
-                with open(self._config_path, "r", encoding="utf-8") as f:
+                with open(self._config_path, encoding="utf-8") as f:
                     loaded = json.load(f)
                     if isinstance(loaded, dict):
                         self._data.update(loaded)
@@ -135,14 +135,14 @@ class ConfigStore:
         if auto_save:
             self.save()
 
-    def update(self, new_data: Dict[str, Any], auto_save: bool = True) -> None:
+    def update(self, new_data: dict[str, Any], auto_save: bool = True) -> None:
         """Actualiza múltiples valores."""
         self._data.update(new_data)
         if auto_save:
             self.save()
 
     @staticmethod
-    def validate_workspace(path_str: str) -> Tuple[bool, str]:
+    def validate_workspace(path_str: str) -> tuple[bool, str]:
         """
         Valida si una ruta de workspace es válida para montaje en Docker y ROS 2.
         Retorna (es_valido, mensaje_descriptivo).

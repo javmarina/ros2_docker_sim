@@ -5,7 +5,6 @@ Centralizes design tokens, semantic status colors, and reusable widget styles.
 
 import logging
 import sys
-from typing import Optional, Tuple, Union
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -59,7 +58,7 @@ STATUS_COLORS = {
 }
 
 
-def get_status_colors(kind: str, is_dark: bool) -> Tuple[str, str, str]:
+def get_status_colors(kind: str, is_dark: bool) -> tuple[str, str, str]:
     """Returns (foreground_color, background_badge_color, border_badge_color) for a status kind."""
     c = STATUS_COLORS.get(kind, STATUS_COLORS["neutral"])
     mode = "dark" if is_dark else "light"
@@ -186,7 +185,7 @@ def is_dark_mode() -> bool:
     return False
 
 
-def set_window_dark_mode(target: Union[QtWidgets.QWidget, int], dark: bool):
+def set_window_dark_mode(target: QtWidgets.QWidget | int, dark: bool):
     """
     Enables/disables Windows 10/11 immersive dark title bar via DWM.
     Safe cross-platform no-op on non-Windows platforms.
@@ -234,8 +233,8 @@ class _ThemeWindowEventFilter(QtCore.QObject):
         return super().eventFilter(obj, event)
 
 
-_GLOBAL_WINDOW_FILTER: Optional[_ThemeWindowEventFilter] = None
-_ACTIVE_THEME_DARK: Optional[bool] = None
+_GLOBAL_WINDOW_FILTER: _ThemeWindowEventFilter | None = None
+_ACTIVE_THEME_DARK: bool | None = None
 
 
 def get_active_theme_mode() -> bool:

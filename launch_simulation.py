@@ -5,9 +5,8 @@ Punto de entrada principal de la aplicación con PySide6 y Docker.
 
 import logging
 import sys
-from pathlib import Path
 
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtGui, QtWidgets
 
 # Configuración del logging estándar
 logging.basicConfig(
@@ -31,7 +30,7 @@ if sys.platform == "win32":
 from embedded_icon import get_app_icon_path
 from exception_dialog import _global_excepthook, setup_global_exception_handler
 from main_window import ModernSimulationLauncher
-from theme import THEME_PALETTES, apply_theme_to_application, is_dark_mode
+from theme import apply_theme_to_application, is_dark_mode
 
 
 def main():

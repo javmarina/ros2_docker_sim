@@ -8,12 +8,13 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
+
+from PySide6 import QtCore, QtWidgets
 
 from config_store import ConfigStore
 from embedded_icon import get_themed_icon
-from PySide6 import QtCore, QtWidgets
 from theme import THEME_PALETTES, style_badge
 from utils import (
     DEFAULT_TURTLEBOT4_MAC,
@@ -45,7 +46,7 @@ class PhysicalRobotTab(QtWidgets.QWidget):
         self,
         config_store: ConfigStore,
         get_workspace_path_cb: Callable[[], str],
-        parent: Optional[QtWidgets.QWidget] = None,
+        parent: QtWidgets.QWidget | None = None,
     ):
         super().__init__(parent)
         self.config_store = config_store

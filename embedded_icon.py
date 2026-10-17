@@ -115,7 +115,6 @@ def get_dropdown_arrow_path(dark_mode: bool = False) -> Path:
             return assets_dir / "chevron_down.png"
 
 
-from typing import Optional
 
 VECTOR_ICONS = {
     # Actions
@@ -148,9 +147,9 @@ VECTOR_ICONS = {
 def _render_vector_icon(
     key: str,
     normal_color: str,
-    selected_color: Optional[str] = None,
-    disabled_color: Optional[str] = None,
-) -> "QtGui.QIcon":
+    selected_color: str | None = None,
+    disabled_color: str | None = None,
+) -> QtGui.QIcon:
     """
     Renderiza un SVG vectorial nítido a múltiples resoluciones (16..128px)
     para visualización perfecta en cualquier escala High-DPI.
@@ -195,7 +194,7 @@ def _render_vector_icon(
     return icon
 
 
-def _tint_pixmap(pm: "QtGui.QPixmap", color_hex: str) -> "QtGui.QPixmap":
+def _tint_pixmap(pm: QtGui.QPixmap, color_hex: str) -> QtGui.QPixmap:
     from PySide6 import QtCore, QtGui
 
     tinted = QtGui.QPixmap(pm.size())
@@ -210,11 +209,11 @@ def _tint_pixmap(pm: "QtGui.QPixmap", color_hex: str) -> "QtGui.QPixmap":
 
 def get_themed_icon(
     name: str,
-    color: Optional[str] = None,
-    selected_color: Optional[str] = None,
-    disabled_color: Optional[str] = None,
-    fallback_sp: Optional["QtWidgets.QStyle.StandardPixmap"] = None,
-) -> "QtGui.QIcon":
+    color: str | None = None,
+    selected_color: str | None = None,
+    disabled_color: str | None = None,
+    fallback_sp: QtWidgets.QStyle.StandardPixmap | None = None,
+) -> QtGui.QIcon:
     """
     Retorna un icono moderno de alta resolución, renderizado vectorialmente (SVG)
     para evitar cualquier pixelación en monitores High-DPI (125%, 150%, 200%).

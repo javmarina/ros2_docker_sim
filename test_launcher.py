@@ -9,7 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtGui, QtWidgets
 
 # Ensure an application instance exists for Qt widgets
 app = QtWidgets.QApplication.instance()
@@ -82,7 +82,7 @@ def test_exception_report_builder():
     """Validates error report formatting without opening GUI dialog."""
     try:
         raise ValueError("Test calculation fault: divide by zero")
-    except ValueError as err:
+    except ValueError:
         exc_type, exc_val, exc_tb = sys.exc_info()
         report = exception_dialog.build_error_report(
             exc_type, exc_val, exc_tb, docker_info="Instalado: Sí | En ejecución: No"

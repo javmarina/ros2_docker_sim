@@ -15,7 +15,6 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
 
 from PySide6 import QtCore, QtGui
 
@@ -35,12 +34,12 @@ class ProcessRunnerSignals(QtCore.QObject):
 
 
 class ProcessRunnerThread(QtCore.QThread):
-    def __init__(self, cmd: List[str], cwd: Optional[str] = None):
+    def __init__(self, cmd: list[str], cwd: str | None = None):
         super().__init__()
         self.cmd = cmd
         self.cwd = cwd
         self.signals = ProcessRunnerSignals()
-        self.proc: Optional[subprocess.Popen] = None
+        self.proc: subprocess.Popen | None = None
 
     def run(self):
         try:
@@ -146,7 +145,7 @@ DEFAULT_TURTLEBOT4_MAC = "e4:5f:01:bd:05:1a"
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
-def get_connected_ssid() -> Optional[str]:
+def get_connected_ssid() -> str | None:
     """Returns the currently connected Wi-Fi SSID, or None."""
     try:
         if sys.platform == "win32":
@@ -233,7 +232,7 @@ def get_local_ip() -> str:
             return "127.0.0.1"
 
 
-def get_ip_from_mac(target_mac: str) -> Optional[str]:
+def get_ip_from_mac(target_mac: str) -> str | None:
     """Scans the local ARP table for an IP associated with the given MAC address."""
     target_mac = target_mac.lower().replace("-", ":").strip()
     try:
@@ -339,10 +338,10 @@ def sftp_upload_dir(sftp, local_dir: Path, remote_dir: str, log_cb=None) -> int:
             cur = f"{cur.rstrip('/')}/{p}"
             try:
                 sftp.stat(cur)
-            except IOError:
+            except OSError:
                 try:
                     sftp.mkdir(cur)
-                except IOError:
+                except OSError:
                     pass
 
     _remote_mkdir_p(remote_dir)
@@ -405,7 +404,7 @@ def _clean_stale_askpass_files():
 
 def open_robot_ssh_terminal(
     ip: str, user: str, password: str, port: str, remote_ws: str
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """
     Opens a native SSH terminal window to the robot.
     Returns (success, message).

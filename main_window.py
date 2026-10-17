@@ -8,8 +8,10 @@ import sys
 import threading
 import time
 import webbrowser
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Dict, Optional, Tuple
+
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from config_store import ConfigStore
 from docker_service import (
@@ -22,7 +24,6 @@ from docker_service import (
 )
 from embedded_icon import get_app_icon_path, get_dropdown_arrow_path, get_themed_icon
 from physical_tab import PhysicalRobotTab
-from PySide6 import QtCore, QtGui, QtWidgets
 from robot_registry import (
     RobotId,
     RobotProfile,
@@ -70,7 +71,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     sig_log_received = QtCore.Signal(str)
     sig_robot_scan_finished = QtCore.Signal(bool, str, bool, str, str)
 
-    def __init__(self, enable_background_tasks: Optional[bool] = None):
+    def __init__(self, enable_background_tasks: bool | None = None):
         super().__init__()
         self.setWindowTitle(
             f"ROS 2 Jazzy - Launcher de simulación (v{CURRENT_VERSION}) | Sistemas de Navegación"
@@ -88,15 +89,15 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self._is_closing = False
 
         self.config_store = ConfigStore(fallback_dir=Path(__file__).parent.resolve())
-        self.active_sim_thread: Optional[ProcessRunnerThread] = None
-        self.active_cmd_thread: Optional[ProcessRunnerThread] = None
-        self.compile_runner: Optional[ProcessRunnerThread] = None
+        self.active_sim_thread: ProcessRunnerThread | None = None
+        self.active_cmd_thread: ProcessRunnerThread | None = None
+        self.compile_runner: ProcessRunnerThread | None = None
         self.autoscroll_enabled = True
         self.ansi_parser = AnsiColorParser()
-        self.latest_update_info: Optional[Dict] = None
+        self.latest_update_info: dict | None = None
 
         self._docker_state: DockerState = DockerState.NOT_RUNNING
-        self._docker_poll_timer: Optional[QtCore.QTimer] = None
+        self._docker_poll_timer: QtCore.QTimer | None = None
         self._docker_poll_count = 0
         self._docker_start_time: float = 0.0
         self._docker_start_max_seconds: int = 90
@@ -105,7 +106,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self._container_state: ContainerState = ContainerState.NOT_RUNNING
         self._container_miss_count = 0
         self._is_checking_container: bool = False
-        self._container_poll_timer: Optional[QtCore.QTimer] = None
+        self._container_poll_timer: QtCore.QTimer | None = None
 
         # Cross-thread signal connections
         self.sig_manual_update_result.connect(self._on_manual_update_result)
@@ -225,7 +226,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         )
         self._apply_theme(is_dark)
 
-    def _apply_theme(self, is_dark: Optional[bool] = None):
+    def _apply_theme(self, is_dark: bool | None = None):
         if is_dark is None:
             is_dark = self.is_dark_mode()
         self._is_dark = is_dark
@@ -249,7 +250,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         style_status_label(label, text, kind, getattr(self, "_is_dark", False))
 
     def _set_button_variant(
-        self, btn: QtWidgets.QPushButton, variant: Optional[str] = None
+        self, btn: QtWidgets.QPushButton, variant: str | None = None
     ):
         btn.setProperty("variant", variant if variant else None)
         btn.style().unpolish(btn)
@@ -1753,7 +1754,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
     @QtCore.Slot(bool, object, str)
     def _on_manual_update_result(
-        self, has_update: bool, info: Optional[Dict], msg: str
+        self, has_update: bool, info: dict | None, msg: str
     ):
         self.btn_check_updates.setEnabled(True)
         if has_update and info:
@@ -2395,7 +2396,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     # -----------------------------------------------------------------------
 
     def _on_pull_or_build_image(
-        self, on_success_callback: Optional[Callable[[], None]] = None
+        self, on_success_callback: Callable[[], None] | None = None
     ):
         image_name = COURSE_IMAGE_NAME
         self.tab_widget.setCurrentIndex(1)

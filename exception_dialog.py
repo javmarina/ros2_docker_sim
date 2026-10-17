@@ -8,10 +8,10 @@ import platform
 import sys
 import traceback
 import urllib.parse
-from typing import Optional
+
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from embedded_icon import get_app_icon_path
-from PySide6 import QtCore, QtGui, QtWidgets
 from theme import build_dialog_stylesheet, get_active_theme_mode
 from updater import CURRENT_VERSION
 
@@ -21,7 +21,7 @@ SUPPORT_EMAIL = "javier.marina@salle.url.edu"
 
 
 def build_error_report(
-    exc_type, exc_value, exc_tb, docker_info: Optional[str] = None
+    exc_type, exc_value, exc_tb, docker_info: str | None = None
 ) -> str:
     """
     Builds a detailed technical error report string from an exception.
@@ -74,7 +74,7 @@ class ExceptionModalDialog(QtWidgets.QDialog):
     """
 
     def __init__(
-        self, exc_type, exc_value, exc_tb, parent: Optional[QtWidgets.QWidget] = None
+        self, exc_type, exc_value, exc_tb, parent: QtWidgets.QWidget | None = None
     ):
         super().__init__(parent)
         self.exc_type = exc_type
@@ -250,7 +250,7 @@ class GlobalExceptionDispatcher(QtCore.QObject):
                 app.quit()
 
 
-_global_dispatcher: Optional[GlobalExceptionDispatcher] = None
+_global_dispatcher: GlobalExceptionDispatcher | None = None
 
 
 def _global_excepthook(exc_type, exc_value, exc_tb):

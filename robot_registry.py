@@ -6,10 +6,11 @@ sin necesidad de modificar la interfaz gráfica ni los servicios Docker.
 
 import base64
 import zlib
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 # Lectura y codificación de turtlebot4_nodock.launch.py y mundos/mapas para inyección dinámica en runtime
 _LAUNCH_FILE = Path(__file__).parent / "turtlebot4_nodock.launch.py"
@@ -104,7 +105,7 @@ class SimulationWorld(str, Enum):
     NOT_APPLICABLE = "(No aplica)"
 
     @classmethod
-    def all_simulation_worlds(cls) -> List["SimulationWorld"]:
+    def all_simulation_worlds(cls) -> list[SimulationWorld]:
         """Retorna todos los mundos reales de simulación Gazebo (excluyendo NOT_APPLICABLE)."""
         return [w for w in cls if w != cls.NOT_APPLICABLE]
 
@@ -125,8 +126,8 @@ class SimulationWorld(str, Enum):
 
     @classmethod
     def from_str(
-        cls, val: Any, default: Optional["SimulationWorld"] = None
-    ) -> "SimulationWorld":
+        cls, val: Any, default: SimulationWorld | None = None
+    ) -> SimulationWorld:
         """Convierte una cadena a SimulationWorld con fallback seguro."""
         if default is None:
             default = cls.EMPTY
@@ -157,7 +158,7 @@ class ScenarioId(str, Enum):
         return any(s.value.lower() == val_str for s in cls)
 
     @classmethod
-    def from_str(cls, val: Any, default: Optional["ScenarioId"] = None) -> "ScenarioId":
+    def from_str(cls, val: Any, default: ScenarioId | None = None) -> ScenarioId:
         if default is None:
             default = cls.CONTAINER_ONLY
         if isinstance(val, cls):
@@ -185,7 +186,7 @@ class RobotId(str, Enum):
         return any(r.value.lower() == val_str for r in cls)
 
     @classmethod
-    def from_str(cls, val: Any, default: Optional["RobotId"] = None) -> "RobotId":
+    def from_str(cls, val: Any, default: RobotId | None = None) -> RobotId:
         if default is None:
             default = cls.BASE
         if isinstance(val, cls):
@@ -220,8 +221,8 @@ class RobotProfile:
         id: str,
         name: str,
         description: str,
-        supported_worlds: List[str],
-        scenarios: List[Scenario],
+        supported_worlds: list[str],
+        scenarios: list[Scenario],
         command_builder: Callable[[str, str, str, bool], str],
     ):
         self.id = id.value if isinstance(id, Enum) else id
@@ -231,7 +232,7 @@ class RobotProfile:
         self.scenarios = scenarios
         self.command_builder = command_builder
 
-    def get_scenario_by_id(self, scenario_id: Any) -> Optional[Scenario]:
+    def get_scenario_by_id(self, scenario_id: Any) -> Scenario | None:
         sc_val = (
             scenario_id.value if isinstance(scenario_id, Enum) else str(scenario_id)
         )
@@ -241,7 +242,7 @@ class RobotProfile:
                 return sc
         return None
 
-    def get_scenario_by_name(self, name: str) -> Optional[Scenario]:
+    def get_scenario_by_name(self, name: str) -> Scenario | None:
         for sc in self.scenarios:
             if sc.name == name or name.startswith(sc.name):
                 return sc
@@ -378,7 +379,7 @@ STANDARD_SCENARIOS = [
 
 
 # --- Registro de Robots Disponibles ---
-ROBOT_REGISTRY: Dict[str, RobotProfile] = {
+ROBOT_REGISTRY: dict[str, RobotProfile] = {
     "generic": RobotProfile(
         id=RobotId.BASE,
         name="Entorno base ROS 2 (Sin robot específico)",
@@ -414,12 +415,12 @@ ROBOT_REGISTRY: Dict[str, RobotProfile] = {
 }
 
 
-def get_all_robots() -> List[RobotProfile]:
+def get_all_robots() -> list[RobotProfile]:
     """Retorna la lista de todos los robots registrados."""
     return list(ROBOT_REGISTRY.values())
 
 
-def get_robot_by_id(robot_id: Any) -> Optional[RobotProfile]:
+def get_robot_by_id(robot_id: Any) -> RobotProfile | None:
     """Busca un robot por su identificador clave."""
     val = (
         robot_id.value if isinstance(robot_id, Enum) else str(robot_id).strip().lower()
@@ -429,7 +430,7 @@ def get_robot_by_id(robot_id: Any) -> Optional[RobotProfile]:
     return ROBOT_REGISTRY.get(val)
 
 
-def get_robot_by_name(name_str: str) -> Optional[RobotProfile]:
+def get_robot_by_name(name_str: str) -> RobotProfile | None:
     """Busca un robot por coincidencia en el nombre o subcadena."""
     for r in ROBOT_REGISTRY.values():
         if (
