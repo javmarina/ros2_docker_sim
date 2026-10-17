@@ -3,6 +3,7 @@ Non-UI utilities: process runner, ANSI color parser, network helpers,
 SFTP upload, Dockerfile management, SSH terminal launcher, and guide content.
 """
 
+import hashlib
 import logging
 import os
 import re
@@ -476,6 +477,20 @@ def open_robot_ssh_terminal(
 # Dockerfile content and sync
 # ---------------------------------------------------------------------------
 
+def _assets_digest() -> str:
+    """Digest of the files COPY'd into the image, so editing them changes the Dockerfile hash."""
+    root = Path(__file__).parent
+    files = [
+        root / "turtlebot4_nodock.launch.py",
+        *root.joinpath("worlds").rglob("*"),
+        *root.joinpath("maps").rglob("*"),
+    ]
+    h = hashlib.sha256()
+    for f in sorted(p for p in files if p.is_file()):
+        h.update(f.relative_to(root).as_posix().encode() + f.read_bytes())
+    return h.hexdigest()[:16]
+
+
 DOCKERFILE_CONTENT = r"""# Dockerfile for University Course on Navigation and ROS 2 Jazzy
 FROM osrf/ros:jazzy-desktop-full
 
@@ -535,20 +550,11 @@ RUN echo "=== [1/3] Actualizando repositorios APT ===" && \
 
 ENV ROBOT_MODEL=turtlebot4
 
-# Pre-descarga de modelos 3D de Gazebo Fuel para mundos de simulacion (Warehouse, Depot)
-RUN /bin/bash -c "source /opt/ros/jazzy/setup.bash && \
-    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/Warehouse' || true && \
-    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/Depot' || true && \
-    gz fuel download -u 'https://fuel.gazebosim.org/1.0/MovAi/models/pallet_box_mobile' || true && \
-    gz fuel download -u 'https://fuel.gazebosim.org/1.0/MovAi/models/shelf' || true && \
-    gz fuel download -u 'https://fuel.gazebosim.org/1.0/MovAi/models/shelf_big' || true && \
-    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/Chair' || true && \
-    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/CoffeeTable' || true && \
-    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/FemaleVisitorSit' || true && \
-    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/Jersey Barrier' || true && \
-    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/MaleVisitorOnPhone' || true && \
-    gz fuel download -u 'https://fuel.gazebosim.org/1.0/OpenRobotics/models/foldable_chair' || true && \
-    gz fuel download -u 'https://fuel.gazebosim.org/1.0/plateau/models/Casual female' || true"
+# Launch file sin dock, mundos (SDF) y mapas (YAML/PNG) de la asignatura
+COPY turtlebot4_nodock.launch.py /opt/ros/jazzy/share/turtlebot4_gz_bringup/launch/
+COPY worlds/ /opt/ros/jazzy/share/turtlebot4_gz_bringup/worlds/
+COPY maps/ /opt/ros/jazzy/share/turtlebot4_navigation/maps/
+LABEL org.nav_course.assets_digest="@ASSETS_DIGEST@"
 
 EXPOSE 6080
 WORKDIR /ros2_ws
@@ -557,7 +563,7 @@ RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc \
     && echo "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi" >> /root/.bashrc
 
 CMD ["/bin/bash"]
-"""
+""".replace("@ASSETS_DIGEST@", _assets_digest())
 
 
 def ensure_dockerfile_sync(workspace_dir: Path) -> Path:
@@ -592,6 +598,17 @@ def ensure_dockerfile_sync(workspace_dir: Path) -> Path:
         current = target_file.read_text(encoding="utf-8") if target_file.exists() else ""
         if current.strip() != effective_content.strip():
             target_file.write_text(effective_content, encoding="utf-8")
+        if build_dir != workspace_dir:
+            src_root = Path(__file__).parent
+            for item in ["turtlebot4_nodock.launch.py", "worlds", "maps"]:
+                src = src_root / item
+                dst = build_dir / item
+                if src.is_file():
+                    shutil.copy2(src, dst)
+                elif src.is_dir():
+                    if dst.exists():
+                        shutil.rmtree(dst)
+                    shutil.copytree(src, dst)
     except Exception as e:
         logger.warning("No se pudo sincronizar Dockerfile en %s: %s", target_file, e)
 

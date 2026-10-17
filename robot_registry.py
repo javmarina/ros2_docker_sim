@@ -4,93 +4,26 @@ Facilita la incorporación de nuevos robots o prácticas en la asignatura
 sin necesidad de modificar la interfaz gráfica ni los servicios Docker.
 """
 
-import base64
-import zlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
-# Lectura y codificación de turtlebot4_nodock.launch.py y mundos/mapas para inyección dinámica en runtime
-_LAUNCH_FILE = Path(__file__).parent / "turtlebot4_nodock.launch.py"
-_WORLDS_DIR = Path(__file__).parent / "worlds"
+# El launch file sin dock, los mundos (worlds/) y los mapas (maps/) se copian a la imagen en el Dockerfile.
 _MAPS_DIR = Path(__file__).parent / "maps"
 
 
-def _read_b64(path: Path) -> str:
-    """Lee y comprime un archivo con zlib y base64 para inyección compacta sin desbordar el límite de comandos de Windows."""
-    if path.is_file():
-        compressed = zlib.compress(path.read_bytes(), level=9)
-        return base64.b64encode(compressed).decode("ascii")
-    return ""
-
-
-_NODOCK_LAUNCH_B64 = _read_b64(_LAUNCH_FILE)
-_WALL_SDF_B64 = _read_b64(_WORLDS_DIR / "wall.sdf")
-_CLASSROOM_SDF_B64 = _read_b64(_WORLDS_DIR / "classroom.sdf")
-_CLASSROOM_YAML_B64 = _read_b64(_MAPS_DIR / "classroom.yaml")
-_CLASSROOM_PNG_B64 = _read_b64(_MAPS_DIR / "classroom.png")
-
-
-def _build_ensure_assets_cmd(world_name: Any) -> str:
-    """Comando para asegurar que turtlebot4_nodock.launch.py y los mundos/mapas existan dentro del contenedor."""
-    world_enum = SimulationWorld.from_str(world_name)
-    cmds = []
-    if _NODOCK_LAUNCH_B64:
-        p = "/opt/ros/jazzy/share/turtlebot4_gz_bringup/launch/turtlebot4_nodock.launch.py"
-        cmds.append(
-            f"open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{_NODOCK_LAUNCH_B64}')))"
-        )
-
-    # Inyección dinámica de mundo si existe archivo SDF local
-    world_sdf = _WORLDS_DIR / f"{world_enum.value}.sdf"
-    if world_sdf.is_file():
-        sdf_b64 = _read_b64(world_sdf)
-        if sdf_b64:
-            p = f"/opt/ros/jazzy/share/turtlebot4_gz_bringup/worlds/{world_enum.value}.sdf"
-            cmds.append(
-                f"open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{sdf_b64}')))"
-            )
-
-    # Inyección dinámica de mapa si existen archivos YAML/PNG locales
-    map_yaml = _MAPS_DIR / f"{world_enum.value}.yaml"
-    if map_yaml.is_file():
-        yaml_b64 = _read_b64(map_yaml)
-        if yaml_b64:
-            p = f"/opt/ros/jazzy/share/turtlebot4_navigation/maps/{world_enum.value}.yaml"
-            cmds.append(
-                f"os.path.exists('{p}') or open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{yaml_b64}')))"
-            )
-
-    map_png = _MAPS_DIR / f"{world_enum.value}.png"
-    if map_png.is_file():
-        png_b64 = _read_b64(map_png)
-        if png_b64:
-            p = f"/opt/ros/jazzy/share/turtlebot4_navigation/maps/{world_enum.value}.png"
-            cmds.append(
-                f"os.path.exists('{p}') or open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{png_b64}')))"
-            )
-
-    # Configuración de postura de cámara GUI según el mundo
+def _build_camera_pose_cmd(world_enum: SimulationWorld) -> str:
+    """Comando que ajusta la postura de la cámara GUI de Gazebo según el mundo (única config dependiente del mundo)."""
     if world_enum == SimulationWorld.CLASSROOM:
         cam_pose = "-2.5 10.5 9.0 0.0 0.675 -0.719"
     else:
         cam_pose = "-6 0 6 0 0.5 0"
-
-    cam_cmd = (
-        f"[(lambda p, c: open(p, 'w').write(re.sub(r'<camera_pose>[^<]+</camera_pose>', '<camera_pose>{cam_pose}</camera_pose>', c)))"
-        f"(gp, open(gp).read()) "
-        f"for m in ['standard', 'lite'] "
-        f"for gp in [f'/opt/ros/jazzy/share/turtlebot4_gz_bringup/gui/{{m}}/gui.config'] "
-        f"if os.path.exists(gp)]"
+    return (
+        f"sed -i 's|<camera_pose>[^<]*</camera_pose>|<camera_pose>{cam_pose}</camera_pose>|' "
+        "/opt/ros/jazzy/share/turtlebot4_gz_bringup/gui/*/gui.config"
     )
-    cmds.append(cam_cmd)
-
-    if not cmds:
-        return ""
-    joined = "; ".join(cmds)
-    return f'python3 -c "import os, sys, re, base64, zlib; {joined}"'
 
 
 # --- Enums para mayor robustez y extensibilidad futura ---
@@ -293,10 +226,8 @@ def _build_turtlebot4_command(
     world_enum = SimulationWorld.from_str(world_name)
     actual_world = world_enum.value
 
-    # Inyección en runtime del launch file sin dock y los recursos del mundo seleccionado
-    ensure_cmd = _build_ensure_assets_cmd(world_enum)
     launch_file = "turtlebot4_nodock.launch.py"
-    prefix = f"{env} && {ensure_cmd}" if ensure_cmd else env
+    prefix = f"{env} && {_build_camera_pose_cmd(world_enum)}"
 
     # Spawn pose: en classroom, spawnear en el corredor despejado (x=1.5, y=1.5) si el usuario no especifica coordenadas
     if world_enum == SimulationWorld.CLASSROOM and "x:=" not in args and "y:=" not in args:
