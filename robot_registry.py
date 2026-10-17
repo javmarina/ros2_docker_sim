@@ -15,14 +15,19 @@ _MAPS_DIR = Path(__file__).parent / "maps"
 
 
 def _build_camera_pose_cmd(world_enum: SimulationWorld) -> str:
-    """Comando que ajusta la postura de la cámara GUI de Gazebo según el mundo (única config dependiente del mundo)."""
+    """Comando que ajusta la cámara, oculta el panel HMI y asegura la configuración limpia de Gazebo."""
     if world_enum == SimulationWorld.CLASSROOM:
         cam_pose = "-2.5 10.5 9.0 0.0 0.675 -0.719"
     else:
         cam_pose = "-6 0 6 0 0.5 0"
     return (
-        f"sed -i 's|<camera_pose>[^<]*</camera_pose>|<camera_pose>{cam_pose}</camera_pose>|' "
-        "/opt/ros/jazzy/share/turtlebot4_gz_bringup/gui/*/gui.config"
+        f"sed -i -e 's|<camera_pose>[^<]*</camera_pose>|<camera_pose>{cam_pose}</camera_pose>|' "
+        "-e '/<plugin filename=.*Hmi/,/<\\/plugin>/d' "
+        "/opt/ros/jazzy/share/turtlebot4_gz_bringup/gui/*/gui.config && "
+        "sed -i '/<gui fullscreen/,/<\\/gui>/d' "
+        "/opt/ros/jazzy/share/turtlebot4_gz_bringup/worlds/classroom.sdf 2>/dev/null || true && "
+        "sed -i \"s/'--controller-manager-timeout', '30'/'--controller-manager-timeout', '120'/g\" "
+        "/opt/ros/jazzy/share/irobot_create_control/launch/include/control.py 2>/dev/null || true"
     )
 
 
@@ -229,11 +234,12 @@ def _build_turtlebot4_command(
     launch_file = "turtlebot4_nodock.launch.py"
     prefix = f"{env} && {_build_camera_pose_cmd(world_enum)}"
 
-    # Spawn pose: en classroom, spawnear en el corredor despejado (x=1.5, y=1.5) si el usuario no especifica coordenadas
-    if world_enum == SimulationWorld.CLASSROOM and "x:=" not in args and "y:=" not in args:
-        args = f"x:=1.5 y:=1.5 yaw:=0.0 {args}".strip()
-
     sc_str = scenario_id.value if isinstance(scenario_id, Enum) else scenario_id
+
+    # Spawn pose: en classroom, spawnear en el corredor despejado (x=1.5, y=1.5) si el usuario no especifica coordenadas
+    launch_args = args
+    if world_enum == SimulationWorld.CLASSROOM and "x:=" not in args and "y:=" not in args:
+        launch_args = f"x:=1.5 y:=1.5 yaw:=0.0 {args}".strip()
 
     if sc_str == ScenarioId.NAV2.value:
         loc_part = (
@@ -241,15 +247,16 @@ def _build_turtlebot4_command(
             if SimulationWorld.has_map(world_enum)
             else "slam:=true"
         )
-        return f"{prefix} && ros2 launch turtlebot4_gz_bringup {launch_file} world:={actual_world} nav2:=true {loc_part} rviz:=true {args}".strip()
+        return f"{prefix} && ros2 launch turtlebot4_gz_bringup {launch_file} world:={actual_world} nav2:=true {loc_part} rviz:=true {launch_args}".strip()
     elif sc_str == ScenarioId.SLAM.value:
-        return f"{prefix} && ros2 launch turtlebot4_gz_bringup {launch_file} world:={actual_world} slam:=true nav2:=true rviz:=true {args}".strip()
+        return f"{prefix} && ros2 launch turtlebot4_gz_bringup {launch_file} world:={actual_world} slam:=true nav2:=true rviz:=true {launch_args}".strip()
     elif sc_str == ScenarioId.SIM_ONLY.value:
-        return f"{prefix} && ros2 launch turtlebot4_gz_bringup {launch_file} world:={actual_world} {args}".strip()
+        return f"{prefix} && ros2 launch turtlebot4_gz_bringup {launch_file} world:={actual_world} {launch_args}".strip()
     elif sc_str == ScenarioId.RVIZ2.value:
         return f"{env} && ros2 launch turtlebot4_viz view_robot.launch.py"
     elif sc_str == ScenarioId.TELEOP.value:
-        return f"{env} && ros2 run teleop_twist_keyboard teleop_twist_keyboard"
+        teleop_args = f"-p stamped:=true {args}".strip()
+        return f"{env} && ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args {teleop_args}".strip()
     else:  # ScenarioId.CONTAINER_ONLY, "bash"
         return _build_container_only_command()
 

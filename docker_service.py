@@ -794,7 +794,7 @@ class DockerService:
 
         # Comando interno de inicialización de display virtual + servidor noVNC + ROS2
         final_shell_cmd = (
-            "rm -rf /dev/shm/fastrtps* >/dev/null 2>&1; "
+            "rm -rf /dev/shm/fastrtps* /dev/shm/sem.fastrtps* >/dev/null 2>&1; "
             "Xvfb :99 -screen 0 1600x900x24 >/dev/null 2>&1 & "
             "sleep 1 && "
             "openbox >/dev/null 2>&1 & "

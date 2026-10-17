@@ -61,7 +61,8 @@ ENV ROBOT_MODEL=turtlebot4
 COPY turtlebot4_nodock.launch.py /opt/ros/jazzy/share/turtlebot4_gz_bringup/launch/
 COPY worlds/ /opt/ros/jazzy/share/turtlebot4_gz_bringup/worlds/
 COPY maps/ /opt/ros/jazzy/share/turtlebot4_navigation/maps/
-LABEL org.nav_course.assets_digest="3c8dea8929d44a19"
+RUN sed -i '/<plugin filename=.*Hmi/,/<\/plugin>/d' /opt/ros/jazzy/share/turtlebot4_gz_bringup/gui/*/gui.config
+LABEL org.nav_course.assets_digest="6cfabf7e6facf7c9"
 
 EXPOSE 6080
 WORKDIR /ros2_ws
@@ -69,6 +70,6 @@ WORKDIR /ros2_ws
 RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc \
     && echo "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi" >> /root/.bashrc
 
-LABEL org.nav_course.dockerfile_hash="e8f46936ab514135"
+LABEL org.nav_course.dockerfile_hash="6b89e3dafd323d3c"
 
 CMD ["/bin/bash"]

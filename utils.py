@@ -554,6 +554,7 @@ ENV ROBOT_MODEL=turtlebot4
 COPY turtlebot4_nodock.launch.py /opt/ros/jazzy/share/turtlebot4_gz_bringup/launch/
 COPY worlds/ /opt/ros/jazzy/share/turtlebot4_gz_bringup/worlds/
 COPY maps/ /opt/ros/jazzy/share/turtlebot4_navigation/maps/
+RUN sed -i '/<plugin filename=.*Hmi/,/<\/plugin>/d' /opt/ros/jazzy/share/turtlebot4_gz_bringup/gui/*/gui.config
 LABEL org.nav_course.assets_digest="@ASSETS_DIGEST@"
 
 EXPOSE 6080
