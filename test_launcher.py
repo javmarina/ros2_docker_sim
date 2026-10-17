@@ -11,11 +11,6 @@ from pathlib import Path
 
 from PySide6 import QtGui, QtWidgets
 
-# Ensure an application instance exists for Qt widgets
-app = QtWidgets.QApplication.instance()
-if app is None:
-    app = QtWidgets.QApplication(["--platform", "offscreen"])
-
 import exception_dialog
 import theme
 import utils
@@ -30,6 +25,11 @@ from robot_registry import (
     get_all_robots,
     get_robot_by_id,
 )
+
+# Ensure an application instance exists for Qt widgets
+app = QtWidgets.QApplication.instance()
+if app is None:
+    app = QtWidgets.QApplication(["--platform", "offscreen"])
 
 
 def test_theme_palettes_and_stylesheet():
@@ -76,6 +76,13 @@ def test_dockerfile_sync():
         assert target_file.is_file()
         content = target_file.read_text(encoding="utf-8")
         assert "ros:jazzy-desktop-full" in content
+        assert "org.nav_course.assets_digest" in content
+        assert "COPY turtlebot4_nodock.launch.py" in content
+        assert "COPY worlds/" in content
+        assert "COPY maps/" in content
+        assert (build_dir / "turtlebot4_nodock.launch.py").is_file()
+        assert (build_dir / "worlds").is_dir()
+        assert (build_dir / "maps").is_dir()
 
 
 def test_exception_report_builder():

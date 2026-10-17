@@ -15,6 +15,8 @@ datas = [
     (str(spec_dir / 'version.json'), '.'),
     (str(spec_dir / 'Dockerfile'), '.'),
     (str(spec_dir / 'turtlebot4_nodock.launch.py'), '.'),
+    (str(spec_dir / 'worlds'), 'worlds'),
+    (str(spec_dir / 'maps'), 'maps'),
 ]
 
 hiddenimports = [
