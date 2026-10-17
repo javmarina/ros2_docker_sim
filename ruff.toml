@@ -1,0 +1,62 @@
+# Ruff configuration file
+# Reference: https://docs.astral.sh/ruff/configuration/
+
+# Target Python 3.14
+target-version = "py314"
+line-length = 100
+indent-width = 4
+
+# Directories or files to ignore
+exclude = [
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "build",
+    "dist",
+]
+
+[lint]
+# Selected rules:
+# E / W: pycodestyle errors and warnings
+# F: Pyflakes (syntax/undefined variables/unused imports)
+# I: isort (import sorting)
+# B: flake8-bugbear (common bug patterns)
+# C4: flake8-comprehensions
+# UP: pyupgrade (modern python syntax)
+# SIM: flake8-simplify
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "B",
+    "C4",
+    "UP",
+    "SIM",
+]
+
+# Sensible ignores for simulator / ROS scripts
+ignore = [
+    "E501",  # Line too long (handled gracefully or formatted by formatter)
+    "SIM108", # Use ternary operator instead of `if`-`else` block (often reduces readability in ROS logic)
+    "SIM105", # Use `contextlib.suppress(...)` instead of `try`-`except`-`pass`
+    "B008",  # Do not perform function call in argument defaults (e.g., launch arguments / typer / click)
+]
+
+# Allow unused variables when prefixed with an underscore
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+# Allow fix for all enabled rules (when `--fix` is provided)
+fixable = ["ALL"]
+unfixable = []
+
+[lint.isort]
+combine-as-imports = true
+known-first-party = ["docker_sim"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
