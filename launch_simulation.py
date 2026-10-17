@@ -28,26 +28,8 @@ if sys.platform == "win32":
 
 # Módulos del proyecto
 from main_window import ModernSimulationLauncher
-from physical_tab import PhysicalRobotTab
-from theme import THEME_PALETTES, is_dark_mode, set_window_dark_mode, build_global_stylesheet
-from utils import (
-    ProcessRunnerSignals,
-    ProcessRunnerThread,
-    AnsiColorParser,
-    get_connected_ssid,
-    get_local_ip,
-    get_ip_from_mac,
-    ping_device,
-    subnet_sweep,
-    sftp_upload_dir,
-    open_robot_ssh_terminal,
-    ensure_dockerfile_sync,
-    DOCKERFILE_CONTENT,
-    GUIDE_MARKDOWN
-)
+from theme import THEME_PALETTES, is_dark_mode, apply_theme_to_application
 from exception_dialog import (
-    ExceptionModalDialog,
-    GlobalExceptionDispatcher,
     setup_global_exception_handler,
     _global_excepthook
 )
@@ -59,6 +41,9 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("ROS 2 Simulation Launcher")
     app.setOrganizationName("La Salle URL")
+
+    # Inicializar tema global (paleta, estilos de diálogos y DWM dark mode)
+    apply_theme_to_application(is_dark_mode())
 
     # Registrar despachador y capturadores globales de excepciones
     setup_global_exception_handler()

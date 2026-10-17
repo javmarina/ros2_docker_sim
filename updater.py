@@ -21,7 +21,7 @@ from typing import Tuple, Optional, Callable, Dict, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from embedded_icon import get_themed_icon
-from theme import build_dialog_stylesheet
+from theme import build_dialog_stylesheet, get_active_theme_mode
 
 # Configurar logger para este módulo
 logger = logging.getLogger("updater")
@@ -679,26 +679,9 @@ class UpdateModalDialog(QtWidgets.QDialog):
         main_layout.addLayout(btn_layout)
 
     def _apply_styles(self):
-        app = QtWidgets.QApplication.instance()
-        is_dark = False
-        if app:
-            hints = app.styleHints()
-            if hasattr(hints, "colorScheme"):
-                is_dark = (hints.colorScheme() == QtCore.Qt.ColorScheme.Dark)
-
-        if sys.platform == "win32":
-            try:
-                import ctypes
-                val = ctypes.c_int(1 if is_dark else 0)
-                res = ctypes.windll.dwmapi.DwmSetWindowAttribute(int(self.winId()), 20, ctypes.byref(val), ctypes.sizeof(val))
-                if res != 0:
-                    ctypes.windll.dwmapi.DwmSetWindowAttribute(int(self.winId()), 19, ctypes.byref(val), ctypes.sizeof(val))
-            except Exception:
-                pass
-
+        is_dark = get_active_theme_mode()
         btn_later_icon_col = "#cbd5e1" if is_dark else "#475569"
         self.btn_later.setIcon(get_themed_icon("window-close", color=btn_later_icon_col))
-
         self.setStyleSheet(build_dialog_stylesheet(is_dark, dialog_type="updater"))
 
     def _on_progress(self, pct: float, status_text: str):

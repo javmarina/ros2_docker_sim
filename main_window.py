@@ -45,8 +45,8 @@ from theme import (
     THEME_PALETTES,
     get_status_colors,
     is_dark_mode,
-    set_window_dark_mode,
     build_global_stylesheet,
+    apply_theme_to_application,
     style_badge,
     style_status_label
 )
@@ -224,8 +224,6 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             is_dark = self.is_dark_mode()
         self._is_dark = is_dark
         self._apply_global_styles(is_dark)
-        if sys.platform == "win32":
-            set_window_dark_mode(int(self.winId()), is_dark)
         self._refresh_icons(is_dark)
         self._update_workspace_validation()
         self._refresh_docker_badge_style()
@@ -306,6 +304,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     def _apply_global_styles(self, is_dark: bool):
         arrow_path = get_dropdown_arrow_path(is_dark)
         arrow_url = arrow_path.as_posix() if hasattr(arrow_path, "as_posix") else str(arrow_path).replace("\\", "/")
+        apply_theme_to_application(is_dark, arrow_url)
         stylesheet = build_global_stylesheet(is_dark, arrow_url)
         self.setStyleSheet(stylesheet)
 

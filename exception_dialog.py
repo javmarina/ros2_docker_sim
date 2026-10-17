@@ -14,7 +14,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from updater import CURRENT_VERSION
 from embedded_icon import get_app_icon_path
-from theme import is_dark_mode, build_dialog_stylesheet
+from theme import get_active_theme_mode, build_dialog_stylesheet
 
 logger = logging.getLogger("launcher")
 
@@ -172,7 +172,7 @@ class ExceptionModalDialog(QtWidgets.QDialog):
         main_layout.addLayout(action_layout)
 
     def _apply_styles(self):
-        is_dark = is_dark_mode()
+        is_dark = get_active_theme_mode()
         self.setStyleSheet(build_dialog_stylesheet(is_dark, dialog_type="exception"))
 
     def _copy_to_clipboard(self):

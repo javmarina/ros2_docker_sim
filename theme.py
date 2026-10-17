@@ -5,9 +5,9 @@ Centralizes design tokens, semantic status colors, and reusable widget styles.
 
 import sys
 import logging
-from typing import Tuple
+from typing import Tuple, Optional, Union
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 logger = logging.getLogger("launcher")
 
@@ -185,11 +185,21 @@ def is_dark_mode() -> bool:
     return False
 
 
-def set_window_dark_mode(hwnd: int, dark: bool):
-    """Enables/disables Windows 10/11 immersive dark title bar via DWM."""
+def set_window_dark_mode(target: Union[QtWidgets.QWidget, int], dark: bool):
+    """
+    Enables/disables Windows 10/11 immersive dark title bar via DWM.
+    Safe cross-platform no-op on non-Windows platforms.
+    Accepts either a QWidget (window) or an integer HWND.
+    """
     if sys.platform != "win32":
         return
     try:
+        if isinstance(target, int):
+            hwnd = target
+        elif hasattr(target, "winId"):
+            hwnd = int(target.winId())
+        else:
+            hwnd = int(target)
         import ctypes
         val = ctypes.c_int(1 if dark else 0)
         # DWMWA_USE_IMMERSIVE_DARK_MODE: 20 on Win11/Win10 20H1+, 19 on earlier builds
@@ -198,6 +208,107 @@ def set_window_dark_mode(hwnd: int, dark: bool):
             ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(val), ctypes.sizeof(val))
     except Exception as e:
         logger.debug("No se pudo configurar DWM immersive dark mode: %s", e)
+
+
+class _ThemeWindowEventFilter(QtCore.QObject):
+    """Event filter that ensures all top-level windows and dialogs (e.g. QMessageBox)
+    receive the Windows 10/11 DWM immersive dark mode attribute when shown."""
+
+    def __init__(self, is_dark: bool = False):
+        super().__init__()
+        self.is_dark = is_dark
+
+    def set_dark(self, is_dark: bool):
+        self.is_dark = is_dark
+
+    def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if event.type() == QtCore.QEvent.Type.Show:
+            if obj.isWidgetType() and getattr(obj, "isWindow", lambda: False)():
+                set_window_dark_mode(obj, self.is_dark)
+        return super().eventFilter(obj, event)
+
+
+_GLOBAL_WINDOW_FILTER: Optional[_ThemeWindowEventFilter] = None
+_ACTIVE_THEME_DARK: Optional[bool] = None
+
+
+def get_active_theme_mode() -> bool:
+    """Returns True if the active theme is dark mode, considering user preference and OS default."""
+    if _ACTIVE_THEME_DARK is not None:
+        return _ACTIVE_THEME_DARK
+    return is_dark_mode()
+
+
+def create_theme_palette(is_dark: bool) -> QtGui.QPalette:
+    """Creates a consistent QPalette for the given theme mode."""
+    p = THEME_PALETTES["dark" if is_dark else "light"]
+    palette = QtGui.QPalette()
+
+    bg = QtGui.QColor(p["bg_window"])
+    fg = QtGui.QColor(p["text_primary"])
+    base = QtGui.QColor(p["bg_input"])
+    card = QtGui.QColor(p["bg_card"])
+    button = QtGui.QColor(p["bg_button"])
+    button_fg = QtGui.QColor(p["text_primary"])
+    highlight = QtGui.QColor(p["primary"])
+    highlight_text = QtGui.QColor("#ffffff")
+    disabled_text = QtGui.QColor(p["text_muted"])
+    disabled_bg = QtGui.QColor(p["bg_button"])
+
+    # Active / Inactive
+    palette.setColor(QtGui.QPalette.ColorRole.Window, bg)
+    palette.setColor(QtGui.QPalette.ColorRole.WindowText, fg)
+    palette.setColor(QtGui.QPalette.ColorRole.Base, base)
+    palette.setColor(QtGui.QPalette.ColorRole.AlternateBase, card)
+    palette.setColor(QtGui.QPalette.ColorRole.ToolTipBase, card)
+    palette.setColor(QtGui.QPalette.ColorRole.ToolTipText, fg)
+    palette.setColor(QtGui.QPalette.ColorRole.Text, fg)
+    palette.setColor(QtGui.QPalette.ColorRole.Button, button)
+    palette.setColor(QtGui.QPalette.ColorRole.ButtonText, button_fg)
+    palette.setColor(QtGui.QPalette.ColorRole.BrightText, QtGui.QColor("#ffffff"))
+    palette.setColor(QtGui.QPalette.ColorRole.Highlight, highlight)
+    palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, highlight_text)
+    palette.setColor(QtGui.QPalette.ColorRole.PlaceholderText, disabled_text)
+
+    # Disabled
+    palette.setColor(QtGui.QPalette.ColorGroup.Disabled, QtGui.QPalette.ColorRole.WindowText, disabled_text)
+    palette.setColor(QtGui.QPalette.ColorGroup.Disabled, QtGui.QPalette.ColorRole.Text, disabled_text)
+    palette.setColor(QtGui.QPalette.ColorGroup.Disabled, QtGui.QPalette.ColorRole.ButtonText, disabled_text)
+    palette.setColor(QtGui.QPalette.ColorGroup.Disabled, QtGui.QPalette.ColorRole.Button, disabled_bg)
+
+    return palette
+
+
+def apply_theme_to_application(is_dark: bool, arrow_url: str = ""):
+    """
+    Applies the full theme (palette, application stylesheet, DWM titlebars)
+    globally to the QApplication instance and all child windows/dialogs.
+    """
+    global _GLOBAL_WINDOW_FILTER, _ACTIVE_THEME_DARK
+    _ACTIVE_THEME_DARK = is_dark
+
+    app = QtWidgets.QApplication.instance()
+    if not app:
+        return
+
+    # 1. Update application palette
+    app.setPalette(create_theme_palette(is_dark))
+
+    # 2. Update application-wide stylesheet
+    qss = build_global_stylesheet(is_dark, arrow_url)
+    app.setStyleSheet(qss)
+
+    # 3. Ensure global DWM window filter is installed and updated
+    if _GLOBAL_WINDOW_FILTER is None:
+        _GLOBAL_WINDOW_FILTER = _ThemeWindowEventFilter(is_dark)
+        app.installEventFilter(_GLOBAL_WINDOW_FILTER)
+    else:
+        _GLOBAL_WINDOW_FILTER.set_dark(is_dark)
+
+    # 4. Update any existing top-level windows
+    for widget in app.topLevelWidgets():
+        if widget.isWindow():
+            set_window_dark_mode(widget, is_dark)
 
 
 # ---------------------------------------------------------------------------
@@ -242,13 +353,74 @@ def build_dialog_stylesheet(is_dark: bool, dialog_type: str = "default") -> str:
     error_fg = STATUS_COLORS["error"][f"fg_{mode}"]
 
     base_css = f"""
-        QDialog {{
+        QDialog, QMessageBox {{
             background-color: {p['bg_window']};
             color: {p['text_primary']};
             font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
         }}
         QLabel {{
             color: {p['text_primary']};
+        }}
+        QMessageBox QLabel, QDialog QLabel {{
+            color: {p['text_primary']};
+            background-color: transparent;
+        }}
+        QMessageBox QLabel#qt_msgbox_label {{
+            font-size: 13px;
+            font-weight: 500;
+            color: {p['text_primary']};
+            line-height: 1.4;
+            background-color: transparent;
+        }}
+        QMessageBox QLabel#qt_msgbox_informativelabel {{
+            font-size: 12px;
+            color: {p['text_secondary']};
+            background-color: transparent;
+        }}
+        QMessageBox QLabel#qt_msgboxex_icon_label {{
+            background-color: transparent;
+        }}
+        QMessageBox QPushButton, QDialog QPushButton {{
+            background-color: {p['bg_button']};
+            border: 1px solid {p['border_input']};
+            border-radius: 6px;
+            padding: 6px 18px;
+            min-width: 68px;
+            min-height: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            color: {p['text_primary']};
+        }}
+        QMessageBox QPushButton:hover, QDialog QPushButton:hover {{
+            background-color: {p['bg_button_hover']};
+            border-color: {p['border_input_hover']};
+        }}
+        QMessageBox QPushButton:pressed, QDialog QPushButton:pressed {{
+            background-color: {p['bg_button_pressed']};
+        }}
+        QMessageBox QPushButton:focus, QDialog QPushButton:focus {{
+            border: 1px solid {p['border_focus']};
+        }}
+        QMessageBox QPushButton:default, QDialog QPushButton:default {{
+            background-color: {p['primary']};
+            color: #ffffff;
+            border: 1px solid {p['primary']};
+            font-weight: 700;
+        }}
+        QMessageBox QPushButton:default:hover, QDialog QPushButton:default:hover {{
+            background-color: {p['primary_hover']};
+            border-color: {p['primary_hover']};
+        }}
+        QMessageBox QDialogButtonBox {{
+            background-color: transparent;
+            border: none;
+        }}
+        QMessageBox QTextEdit, QMessageBox QPlainTextEdit,
+        QDialog QTextEdit, QDialog QPlainTextEdit {{
+            background-color: {p['bg_input']};
+            color: {p['text_primary']};
+            border: 1px solid {p['border_input']};
+            border-radius: 6px;
         }}
     """
 
@@ -426,13 +598,80 @@ def build_global_stylesheet(is_dark: bool, arrow_url: str = "") -> str:
     err_fg, err_bg, err_border = get_status_colors("error", is_dark)
     clean_arrow_url = str(arrow_url).replace("\\", "/") if arrow_url else ""
     return f"""
-        QMainWindow {{
+        QMainWindow, QDialog, QMessageBox {{
             background-color: {p['bg_window']};
             font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
+            color: {p['text_primary']};
         }}
         QWidget {{
             font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
             color: {p['text_primary']};
+        }}
+        /* Diálogos modales y cuadros de mensaje (QDialog & QMessageBox) */
+        QDialog, QMessageBox {{
+            background-color: {p['bg_window']};
+            color: {p['text_primary']};
+        }}
+        QMessageBox QLabel, QDialog QLabel {{
+            color: {p['text_primary']};
+            background-color: transparent;
+        }}
+        QMessageBox QLabel#qt_msgbox_label {{
+            font-size: 13px;
+            font-weight: 500;
+            color: {p['text_primary']};
+            line-height: 1.4;
+            background-color: transparent;
+        }}
+        QMessageBox QLabel#qt_msgbox_informativelabel {{
+            font-size: 12px;
+            color: {p['text_secondary']};
+            background-color: transparent;
+        }}
+        QMessageBox QLabel#qt_msgboxex_icon_label {{
+            background-color: transparent;
+        }}
+        QMessageBox QPushButton, QDialog QPushButton {{
+            background-color: {p['bg_button']};
+            border: 1px solid {p['border_input']};
+            border-radius: 6px;
+            padding: 6px 18px;
+            min-width: 68px;
+            min-height: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            color: {p['text_primary']};
+        }}
+        QMessageBox QPushButton:hover, QDialog QPushButton:hover {{
+            background-color: {p['bg_button_hover']};
+            border-color: {p['border_input_hover']};
+        }}
+        QMessageBox QPushButton:pressed, QDialog QPushButton:pressed {{
+            background-color: {p['bg_button_pressed']};
+        }}
+        QMessageBox QPushButton:focus, QDialog QPushButton:focus {{
+            border: 1px solid {p['border_focus']};
+        }}
+        QMessageBox QPushButton:default, QDialog QPushButton:default {{
+            background-color: {p['primary']};
+            color: #ffffff;
+            border: 1px solid {p['primary']};
+            font-weight: 700;
+        }}
+        QMessageBox QPushButton:default:hover, QDialog QPushButton:default:hover {{
+            background-color: {p['primary_hover']};
+            border-color: {p['primary_hover']};
+        }}
+        QMessageBox QDialogButtonBox {{
+            background-color: transparent;
+            border: none;
+        }}
+        QMessageBox QTextEdit, QMessageBox QPlainTextEdit,
+        QDialog QTextEdit, QDialog QPlainTextEdit {{
+            background-color: {p['bg_input']};
+            color: {p['text_primary']};
+            border: 1px solid {p['border_input']};
+            border-radius: 6px;
         }}
         /* Header */
         #headerFrame {{
