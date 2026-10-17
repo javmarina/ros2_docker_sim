@@ -4,13 +4,13 @@ Guarda las preferencias del usuario (workspace, robot, escenario, etc.) en AppDa
 para evitar pérdida de configuraciones entre ejecuciones.
 """
 
-import os
 import json
+import os
 import platform
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from robot_registry import SimulationWorld, ScenarioId, RobotId
+from robot_registry import RobotId, ScenarioId, SimulationWorld
 
 
 class ConfigStore:

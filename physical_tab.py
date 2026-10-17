@@ -4,27 +4,26 @@ Handles local Wi-Fi verification, ARP network detection, SSH connection params,
 SFTP code synchronization, remote compilation (colcon build), and SSH terminal launching.
 """
 
-import os
-import time
 import logging
+import os
 import threading
+import time
 from pathlib import Path
-from typing import Optional, Callable
-
-from PySide6 import QtCore, QtWidgets
+from typing import Callable, Optional
 
 from config_store import ConfigStore
 from embedded_icon import get_themed_icon
-from theme import style_badge, THEME_PALETTES
+from PySide6 import QtCore, QtWidgets
+from theme import THEME_PALETTES, style_badge
 from utils import (
     DEFAULT_TURTLEBOT4_MAC,
     get_connected_ssid,
-    get_local_ip,
     get_ip_from_mac,
-    ping_device,
-    subnet_sweep,
-    sftp_upload_dir,
+    get_local_ip,
     open_robot_ssh_terminal,
+    ping_device,
+    sftp_upload_dir,
+    subnet_sweep,
 )
 
 logger = logging.getLogger("launcher")

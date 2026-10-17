@@ -3,9 +3,9 @@ Theme palettes, dark mode detection, global and dialog stylesheet generation.
 Centralizes design tokens, semantic status colors, and reusable widget styles.
 """
 
-import sys
 import logging
-from typing import Tuple, Optional, Union
+import sys
+from typing import Optional, Tuple, Union
 
 from PySide6 import QtCore, QtGui, QtWidgets
 

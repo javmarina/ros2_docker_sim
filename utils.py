@@ -3,19 +3,19 @@ Non-UI utilities: process runner, ANSI color parser, network helpers,
 SFTP upload, Dockerfile management, SSH terminal launcher, and guide content.
 """
 
+import logging
 import os
 import re
-import sys
 import shutil
-import subprocess
-import threading
 import socket
-import time
+import subprocess
+import sys
 import tempfile
-import logging
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional, List, Tuple, Callable
+from typing import Callable, List, Optional, Tuple
 
 from PySide6 import QtCore, QtGui
 

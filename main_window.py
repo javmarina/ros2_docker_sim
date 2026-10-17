@@ -2,54 +2,53 @@
 Main application window for the ROS 2 Simulation Launcher.
 """
 
+import logging
 import os
 import sys
-import time
-import logging
 import threading
+import time
 import webbrowser
 from pathlib import Path
-from typing import Optional, Dict, Tuple, Callable
-
-from PySide6 import QtCore, QtGui, QtWidgets
+from typing import Callable, Dict, Optional, Tuple
 
 from config_store import ConfigStore
-from robot_registry import (
-    get_all_robots,
-    get_robot_by_id,
-    get_robot_by_name,
-    RobotProfile,
-    SimulationWorld,
-    ScenarioId,
-    RobotId,
-)
 from docker_service import (
-    DockerService,
-    DockerState,
-    ContainerState,
     COURSE_IMAGE_NAME,
     DEFAULT_CONTAINER_NAME,
     DEFAULT_NOVNC_PORT,
+    ContainerState,
+    DockerService,
+    DockerState,
 )
-from updater import CURRENT_VERSION, check_for_updates, UpdateModalDialog
 from embedded_icon import get_app_icon_path, get_dropdown_arrow_path, get_themed_icon
+from physical_tab import PhysicalRobotTab
+from PySide6 import QtCore, QtGui, QtWidgets
+from robot_registry import (
+    RobotId,
+    RobotProfile,
+    ScenarioId,
+    SimulationWorld,
+    get_all_robots,
+    get_robot_by_id,
+    get_robot_by_name,
+)
 from theme import (
     THEME_PALETTES,
+    apply_theme_to_application,
+    build_global_stylesheet,
     get_status_colors,
     is_dark_mode,
-    build_global_stylesheet,
-    apply_theme_to_application,
     style_badge,
     style_status_label,
 )
+from updater import CURRENT_VERSION, UpdateModalDialog, check_for_updates
 from utils import (
-    ProcessRunnerThread,
-    AnsiColorParser,
     DOCKERFILE_CONTENT,
-    ensure_dockerfile_sync,
     GUIDE_MARKDOWN,
+    AnsiColorParser,
+    ProcessRunnerThread,
+    ensure_dockerfile_sync,
 )
-from physical_tab import PhysicalRobotTab
 
 logger = logging.getLogger("launcher")
 

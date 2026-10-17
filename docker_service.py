@@ -4,18 +4,18 @@ Gestiona el ciclo de vida del contenedor, volúmenes, descarga/construcción de 
 y la apertura de terminales interactivas (Windows Terminal / PowerShell / CMD).
 """
 
+import hashlib
+import logging
 import os
+import platform
 import re
-import sys
 import shutil
 import socket
-import logging
-import platform
 import subprocess
-from pathlib import Path
-from typing import Tuple, Callable, Optional, List, Dict
+import sys
 from enum import Enum
-import hashlib
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("docker_service")
 

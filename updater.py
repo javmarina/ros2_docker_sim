@@ -5,22 +5,22 @@ Soporta actualización tanto de binarios congelados (.exe compilado con PyInstal
 como de código fuente (modo script Python).
 """
 
-import os
-import sys
 import json
-import zipfile
-import tempfile
 import logging
+import os
 import platform
 import subprocess
+import sys
+import tempfile
 import threading
-import urllib.request
 import urllib.error
+import urllib.request
+import zipfile
 from pathlib import Path
-from typing import Tuple, Optional, Callable, Dict, Any
+from typing import Any, Callable, Dict, Optional, Tuple
 
-from PySide6 import QtCore, QtGui, QtWidgets
 from embedded_icon import get_themed_icon
+from PySide6 import QtCore, QtGui, QtWidgets
 from theme import build_dialog_stylesheet, get_active_theme_mode
 
 # Configurar logger para este módulo

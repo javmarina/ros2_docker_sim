@@ -3,8 +3,8 @@ Launcher de Simulación ROS 2 Jazzy para la Asignatura de Robótica Móvil
 Punto de entrada principal de la aplicación con PySide6 y Docker.
 """
 
-import sys
 import logging
+import sys
 from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -28,10 +28,10 @@ if sys.platform == "win32":
         pass
 
 # Módulos del proyecto
-from main_window import ModernSimulationLauncher
-from theme import THEME_PALETTES, is_dark_mode, apply_theme_to_application
-from exception_dialog import setup_global_exception_handler, _global_excepthook
 from embedded_icon import get_app_icon_path
+from exception_dialog import _global_excepthook, setup_global_exception_handler
+from main_window import ModernSimulationLauncher
+from theme import THEME_PALETTES, apply_theme_to_application, is_dark_mode
 
 
 def main():

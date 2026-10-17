@@ -4,8 +4,8 @@ Can be executed with pytest: `pytest test_launcher.py`
 or directly: `python test_launcher.py`
 """
 
-import sys
 import json
+import sys
 import tempfile
 from pathlib import Path
 
@@ -16,19 +16,19 @@ app = QtWidgets.QApplication.instance()
 if app is None:
     app = QtWidgets.QApplication(["--platform", "offscreen"])
 
+import exception_dialog
 import theme
 import utils
-import exception_dialog
 from config_store import ConfigStore
-from physical_tab import PhysicalRobotTab
 from docker_service import ContainerState
 from main_window import ModernSimulationLauncher
+from physical_tab import PhysicalRobotTab
 from robot_registry import (
+    RobotId,
+    ScenarioId,
+    SimulationWorld,
     get_all_robots,
     get_robot_by_id,
-    SimulationWorld,
-    ScenarioId,
-    RobotId,
 )
 
 
@@ -396,6 +396,7 @@ def test_config_store_world_fallback():
 def test_docker_startup_progress_timer():
     """Validates Docker startup elapsed timer, UI badge formatting, and timer cleanup on state change."""
     import time
+
     from docker_service import DockerState
 
     win = ModernSimulationLauncher(enable_background_tasks=False)
@@ -438,6 +439,7 @@ def test_docker_startup_progress_timer():
 def test_docker_service_detection():
     """Validates DockerService fast detection, version extraction, and state enum mapping."""
     import time
+
     from docker_service import DockerService, DockerState
 
     installed, ver_info = DockerService.check_docker_installed()

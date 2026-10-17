@@ -2,19 +2,18 @@
 Modal dialog and global exception handling dispatcher for unexpected errors.
 """
 
-import sys
-import platform
 import datetime
+import logging
+import platform
+import sys
 import traceback
 import urllib.parse
-import logging
 from typing import Optional
 
-from PySide6 import QtCore, QtGui, QtWidgets
-
-from updater import CURRENT_VERSION
 from embedded_icon import get_app_icon_path
-from theme import get_active_theme_mode, build_dialog_stylesheet
+from PySide6 import QtCore, QtGui, QtWidgets
+from theme import build_dialog_stylesheet, get_active_theme_mode
+from updater import CURRENT_VERSION
 
 logger = logging.getLogger("launcher")
 
