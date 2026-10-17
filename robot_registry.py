@@ -5,6 +5,7 @@ sin necesidad de modificar la interfaz gráfica ni los servicios Docker.
 """
 
 import base64
+import zlib
 from enum import Enum
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -17,8 +18,10 @@ _MAPS_DIR = Path(__file__).parent / "maps"
 
 
 def _read_b64(path: Path) -> str:
+    """Lee y comprime un archivo con zlib y base64 para inyección compacta sin desbordar el límite de comandos de Windows."""
     if path.is_file():
-        return base64.b64encode(path.read_bytes()).decode("ascii")
+        compressed = zlib.compress(path.read_bytes(), level=9)
+        return base64.b64encode(compressed).decode("ascii")
     return ""
 
 
@@ -35,7 +38,7 @@ def _build_ensure_assets_cmd(world_name: Any) -> str:
     cmds = []
     if _NODOCK_LAUNCH_B64:
         p = "/opt/ros/jazzy/share/turtlebot4_gz_bringup/launch/turtlebot4_nodock.launch.py"
-        cmds.append(f"os.path.exists('{p}') or open('{p}', 'wb').write(base64.b64decode('{_NODOCK_LAUNCH_B64}'))")
+        cmds.append(f"open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{_NODOCK_LAUNCH_B64}')))")
 
     # Inyección dinámica de mundo si existe archivo SDF local
     world_sdf = _WORLDS_DIR / f"{world_enum.value}.sdf"
@@ -43,7 +46,7 @@ def _build_ensure_assets_cmd(world_name: Any) -> str:
         sdf_b64 = _read_b64(world_sdf)
         if sdf_b64:
             p = f"/opt/ros/jazzy/share/turtlebot4_gz_bringup/worlds/{world_enum.value}.sdf"
-            cmds.append(f"os.path.exists('{p}') or open('{p}', 'wb').write(base64.b64decode('{sdf_b64}'))")
+            cmds.append(f"open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{sdf_b64}')))")
 
     # Inyección dinámica de mapa si existen archivos YAML/PNG locales
     map_yaml = _MAPS_DIR / f"{world_enum.value}.yaml"
@@ -51,19 +54,19 @@ def _build_ensure_assets_cmd(world_name: Any) -> str:
         yaml_b64 = _read_b64(map_yaml)
         if yaml_b64:
             p = f"/opt/ros/jazzy/share/turtlebot4_navigation/maps/{world_enum.value}.yaml"
-            cmds.append(f"os.path.exists('{p}') or open('{p}', 'wb').write(base64.b64decode('{yaml_b64}'))")
+            cmds.append(f"os.path.exists('{p}') or open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{yaml_b64}')))")
 
     map_png = _MAPS_DIR / f"{world_enum.value}.png"
     if map_png.is_file():
         png_b64 = _read_b64(map_png)
         if png_b64:
             p = f"/opt/ros/jazzy/share/turtlebot4_navigation/maps/{world_enum.value}.png"
-            cmds.append(f"os.path.exists('{p}') or open('{p}', 'wb').write(base64.b64decode('{png_b64}'))")
+            cmds.append(f"os.path.exists('{p}') or open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{png_b64}')))")
 
     if not cmds:
         return ""
     joined = "; ".join(cmds)
-    return f'python3 -c "import os, base64; {joined}"'
+    return f'python3 -c "import os, sys, re, base64, zlib; {joined}"'
 
 
 # --- Enums para mayor robustez y extensibilidad futura ---
