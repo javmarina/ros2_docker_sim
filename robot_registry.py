@@ -63,6 +63,21 @@ def _build_ensure_assets_cmd(world_name: Any) -> str:
             p = f"/opt/ros/jazzy/share/turtlebot4_navigation/maps/{world_enum.value}.png"
             cmds.append(f"os.path.exists('{p}') or open('{p}', 'wb').write(zlib.decompress(base64.b64decode('{png_b64}')))")
 
+    # Configuración de postura de cámara GUI según el mundo
+    if world_enum == SimulationWorld.CLASSROOM:
+        cam_pose = "-2.5 10.5 9.0 0.0 0.675 -0.719"
+    else:
+        cam_pose = "-6 0 6 0 0.5 0"
+
+    cam_cmd = (
+        f"[(lambda p, c: open(p, 'w').write(re.sub(r'<camera_pose>[^<]+</camera_pose>', '<camera_pose>{cam_pose}</camera_pose>', c)))"
+        f"(gp, open(gp).read()) "
+        f"for m in ['standard', 'lite'] "
+        f"for gp in [f'/opt/ros/jazzy/share/turtlebot4_gz_bringup/gui/{{m}}/gui.config'] "
+        f"if os.path.exists(gp)]"
+    )
+    cmds.append(cam_cmd)
+
     if not cmds:
         return ""
     joined = "; ".join(cmds)
