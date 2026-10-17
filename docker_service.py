@@ -174,12 +174,105 @@ class DockerService:
             return False, str(e)
 
     @classmethod
-    def check_docker_running(cls, timeout: float = 4.0) -> Tuple[bool, str]:
-        """Comprueba si el servicio/daemon de Docker está activo."""
+    def is_docker_desktop_process_running(cls) -> bool:
+        """
+        Comprueba de forma no bloqueante (en ~3-10ms) si los procesos de Docker Desktop
+        o del daemon de Docker están activos en el sistema operativo anfitrión.
+        """
+        host_os = cls.get_host_os()
+        if host_os == "windows":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                TH32CS_SNAPPROCESS = 0x00000002
+                class PROCESSENTRY32(ctypes.Structure):
+                    _fields_ = [
+                        ('dwSize', wintypes.DWORD),
+                        ('cntUsage', wintypes.DWORD),
+                        ('th32ProcessID', wintypes.DWORD),
+                        ('th32DefaultHeapID', ctypes.c_void_p),
+                        ('th32ModuleID', wintypes.DWORD),
+                        ('cntThreads', wintypes.DWORD),
+                        ('th32ParentProcessID', wintypes.DWORD),
+                        ('pcPriClassBase', wintypes.LONG),
+                        ('dwFlags', wintypes.DWORD),
+                        ('szExeFile', ctypes.c_char * 260)
+                    ]
+                hSnap = ctypes.windll.kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+                if hSnap == -1 or not hSnap:
+                    return True
+                pe = PROCESSENTRY32()
+                pe.dwSize = ctypes.sizeof(PROCESSENTRY32)
+                found = False
+                target_names = (b"docker desktop.exe", b"com.docker.backend.exe", b"com.docker.proxy.exe", b"dockerd.exe")
+                if ctypes.windll.kernel32.Process32First(hSnap, ctypes.byref(pe)):
+                    while True:
+                        name_lower = pe.szExeFile.lower()
+                        if any(t in name_lower for t in target_names):
+                            found = True
+                            break
+                        if not ctypes.windll.kernel32.Process32Next(hSnap, ctypes.byref(pe)):
+                            break
+                ctypes.windll.kernel32.CloseHandle(hSnap)
+                return found
+            except Exception:
+                return True
+        elif host_os == "mac":
+            try:
+                res = subprocess.run(["pgrep", "-i", "docker"], stdout=subprocess.PIPE, check=False, timeout=1.0)
+                return res.returncode == 0
+            except Exception:
+                return True
+        else:
+            try:
+                res = subprocess.run(["pgrep", "-x", "dockerd"], stdout=subprocess.PIPE, check=False, timeout=1.0)
+                return res.returncode == 0
+            except Exception:
+                return True
+
+    @classmethod
+    def is_docker_pipe_ready(cls) -> bool:
+        """
+        En Windows, comprueba de forma instantánea (< 1ms) si el canal IPC (Named Pipe)
+        de Docker Desktop ('\\\\.\\pipe\\docker_engine') ya existe y está escuchando.
+        Evita que 'docker version' se cuelgue esperando un pipe inexistente durante el arranque.
+        """
+        host_os = cls.get_host_os()
+        if host_os != "windows" or os.environ.get("DOCKER_HOST"):
+            return True
+        try:
+            import ctypes
+            res = ctypes.windll.kernel32.WaitNamedPipeW(r"\\.\pipe\docker_engine", 50)
+            if res != 0:
+                return True
+            err = ctypes.windll.kernel32.GetLastError()
+            if err == 2:  # ERROR_FILE_NOT_FOUND: el pipe no ha sido creado aún
+                return False
+            return True
+        except Exception:
+            return True
+
+    @classmethod
+    def get_docker_status(cls, timeout: float = 2.5) -> Tuple[DockerState, str]:
+        """
+        Determina de forma rápida, robusta y tipada el estado del servicio Docker
+        (RUNNING, STARTING, NOT_RUNNING) junto con un mensaje descriptivo.
+        """
         cls.ensure_docker_in_path()
+
+        # 1. Comprobación instantánea de procesos del sistema (~3-10ms)
+        process_running = cls.is_docker_desktop_process_running()
+        if not process_running:
+            return DockerState.NOT_RUNNING, "Docker Desktop no está en ejecución."
+
+        # 2. En Windows, si el proceso corre pero el Named Pipe no existe aún, el motor está arrancando (< 1ms)
+        if not cls.is_docker_pipe_ready():
+            return DockerState.STARTING, "Docker Desktop se está iniciando (arrancando motor)..."
+
+        # 3. El Named Pipe existe: verificar si el daemon responde con la versión
         try:
             res = subprocess.run(
-                ["docker", "info", "--format", "{{.ServerVersion}}"],
+                ["docker", "version", "--format", "{{.Server.Version}}"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -187,16 +280,35 @@ class DockerService:
                 timeout=timeout,
                 creationflags=WIN32_NO_WINDOW
             )
+            v = res.stdout.strip()
+            if res.returncode == 0 and v and "<no value>" not in v:
+                return DockerState.RUNNING, f"Docker activo (v{v})"
+
             if res.returncode == 0:
-                return True, f"Docker activo (v{res.stdout.strip()})"
+                return DockerState.RUNNING, "Docker activo"
+
             err_msg = res.stderr.strip()
+            # Si el proceso de Docker Desktop está activo pero el daemon aún no responde, está en arranque
+            if process_running:
+                return DockerState.STARTING, "Docker Desktop se está iniciando..."
             if not err_msg:
-                err_msg = "Docker Desktop no está en ejecución."
-            return False, err_msg
+                err_msg = "Docker Desktop no está en ejecución o el daemon no responde."
+            return DockerState.NOT_RUNNING, err_msg
         except subprocess.TimeoutExpired:
-            return False, "Tiempo de espera agotado al conectar con el daemon de Docker."
+            if cls.is_docker_desktop_process_running():
+                return DockerState.STARTING, "Docker Desktop se está iniciando (el motor aún no responde)..."
+            return DockerState.NOT_RUNNING, "Tiempo de espera agotado al conectar con el daemon de Docker."
         except Exception as e:
-            return False, str(e)
+            return DockerState.NOT_RUNNING, str(e)
+
+    @classmethod
+    def check_docker_running(cls, timeout: float = 2.5) -> Tuple[bool, str]:
+        """
+        Comprueba de forma rápida si el daemon de Docker está activo.
+        Mantiene compatibilidad devolviendo (bool, str).
+        """
+        state, msg = cls.get_docker_status(timeout=timeout)
+        return state.is_running, msg
 
     @classmethod
     def is_docker_installed(cls, timeout: float = 4.0) -> bool:
@@ -205,15 +317,19 @@ class DockerService:
         return installed
 
     @classmethod
-    def is_docker_running(cls, timeout: float = 4.0) -> bool:
+    def is_docker_running(cls, timeout: float = 2.5) -> bool:
         """Comprueba de forma rápida si el daemon de Docker está en ejecución."""
         running, _ = cls.check_docker_running(timeout=timeout)
         return running
 
     @classmethod
-    def get_docker_state(cls, timeout: float = 4.0) -> DockerState:
-        """Determina el estado actual de Docker como DockerState enum."""
-        return DockerState.RUNNING if cls.is_docker_running(timeout=timeout) else DockerState.NOT_RUNNING
+    def get_docker_state(cls, timeout: float = 2.5) -> DockerState:
+        """Determina el estado actual de Docker como DockerState enum (RUNNING, STARTING, NOT_RUNNING)."""
+        installed = cls.is_docker_installed(timeout=1.5)
+        if not installed:
+            return DockerState.NOT_RUNNING
+        state, _ = cls.get_docker_status(timeout=timeout)
+        return state
 
     @classmethod
     def find_docker_desktop_path(cls) -> Optional[Path]:
@@ -280,9 +396,12 @@ class DockerService:
         Inicia Docker Desktop en el sistema anfitrión si no está corriendo.
         Retorna (éxito, mensaje).
         """
-        running, _ = cls.check_docker_running(timeout=2.0)
-        if running:
+        state, _ = cls.get_docker_status(timeout=2.0)
+        if state == DockerState.RUNNING:
             return True, "Docker Desktop ya se encuentra en ejecución."
+
+        if state == DockerState.STARTING or cls.is_docker_desktop_process_running():
+            return True, "Docker Desktop ya se encuentra iniciando."
 
         host_os = cls.get_host_os()
         if host_os == "windows":

@@ -236,6 +236,9 @@ def test_dialog_stylesheets_and_variants():
 
     default_qss = theme.build_dialog_stylesheet(is_dark=False, dialog_type="default")
     assert "QDialog" in default_qss
+    assert "QMessageBox" in default_qss
+    assert "QMessageBox" in exc_qss
+    assert "QMessageBox" in theme.build_global_stylesheet(is_dark=True)
 
     # Test arrow_url sanitization for Windows backslashes in QSS
     win_qss = theme.build_global_stylesheet(False, r"C:\Users\test\chevron_down.svg")
@@ -376,6 +379,173 @@ def test_config_store_world_fallback():
         assert store.get("scenario_id") == ScenarioId.CONTAINER_ONLY.value
 
 
+def test_docker_startup_progress_timer():
+    """Validates Docker startup elapsed timer, UI badge formatting, and timer cleanup on state change."""
+    import time
+    from docker_service import DockerState
+
+    win = ModernSimulationLauncher(enable_background_tasks=False)
+    try:
+        # 1. Direct progress slot test
+        win._on_docker_poll_progress(12, 90)
+        assert "12s" in win.lbl_docker_badge.text()
+        assert "12s / 90s" in win.lbl_progress.text()
+
+        # 2. Timer tick logic test
+        win._docker_state = DockerState.STARTING
+        win._docker_start_time = time.monotonic() - 5.0
+        win._docker_start_max_seconds = 90
+        win._start_docker_progress_timer()
+        assert win._docker_poll_timer is not None
+        assert win._docker_poll_timer.isActive()
+
+        # Emulate timer tick
+        win._on_docker_progress_tick()
+        QtWidgets.QApplication.processEvents()
+        assert "5s" in win.lbl_docker_badge.text() or "6s" in win.lbl_docker_badge.text()
+
+        # 3. State transition to RUNNING should stop the progress timer
+        win._set_docker_state(DockerState.RUNNING)
+        assert not win._docker_poll_timer.isActive()
+
+        # 4. Starting state transition to NOT_RUNNING should also stop timer
+        win._docker_state = DockerState.STARTING
+        win._start_docker_progress_timer()
+        assert win._docker_poll_timer.isActive()
+        win._set_docker_state(DockerState.NOT_RUNNING)
+        assert not win._docker_poll_timer.isActive()
+    finally:
+        win.close()
+        QtWidgets.QApplication.processEvents()
+
+
+def test_docker_service_detection():
+    """Validates DockerService fast detection, version extraction, and state enum mapping."""
+    import time
+    from docker_service import DockerService, DockerState
+
+    installed, ver_info = DockerService.check_docker_installed()
+    assert isinstance(installed, bool)
+    assert isinstance(ver_info, str)
+
+    t0 = time.monotonic()
+    running, daemon_msg = DockerService.check_docker_running(timeout=5.0)
+    elapsed = time.monotonic() - t0
+
+    assert isinstance(running, bool)
+    assert isinstance(daemon_msg, str)
+    # The optimized query must complete well within 3 seconds
+    assert elapsed < 3.0
+
+    state = DockerService.get_docker_state()
+    if running:
+        assert state == DockerState.RUNNING
+        assert "Docker activo" in daemon_msg
+    else:
+        assert state in (DockerState.NOT_RUNNING, DockerState.STARTING)
+
+    status_state, status_msg = DockerService.get_docker_status(timeout=5.0)
+    assert isinstance(status_state, DockerState)
+    assert isinstance(status_msg, str)
+    assert status_state == state
+
+    # Validar que los métodos de proceso y canal IPC funcionen y retornen booleanos
+    assert isinstance(DockerService.is_docker_desktop_process_running(), bool)
+    assert isinstance(DockerService.is_docker_pipe_ready(), bool)
+
+    # Validar que _apply_docker_status acepte directamente el enum DockerState sin hackeos de strings
+    win = ModernSimulationLauncher(enable_background_tasks=False)
+    try:
+        win._apply_docker_status(True, DockerState.STARTING, "Arrancando...")
+        assert win.docker_state == DockerState.STARTING
+        assert "Arrancando" in win.lbl_docker_badge.text()
+
+        win._apply_docker_status(True, DockerState.RUNNING, "Docker activo (v29.0)")
+        assert win.docker_state == DockerState.RUNNING
+        assert "activo" in win.lbl_docker_badge.text()
+
+        win._apply_docker_status(True, DockerState.NOT_RUNNING, "Detenido")
+        assert win.docker_state == DockerState.NOT_RUNNING
+        assert "detenido" in win.lbl_docker_badge.text()
+    finally:
+        win.close()
+        QtWidgets.QApplication.processEvents()
+
+
+def test_docker_command_length_windows_limits():
+    """Verifica que ningún comando de Docker generado supere el límite de Windows CreateProcess (32,767 caracteres)."""
+    from docker_service import DockerService
+    max_len = 0
+    worst_case = ""
+    for robot in get_all_robots():
+        for world in robot.supported_worlds:
+            for sc in robot.scenarios:
+                cmd = robot.build_command(sc.id, world)
+                docker_cmd = DockerService.build_docker_run_args(
+                    "ros2-jazzy-nav-course:latest", "test_container", cmd, "42", robot.id, "C:/fake/ws"
+                )
+                cmd_str = " ".join(docker_cmd)
+                length = len(cmd_str)
+                if length > max_len:
+                    max_len = length
+                    worst_case = f"{robot.id} / {world} / {sc.id}"
+                # Must be strictly below Windows CreateProcessW 32,767 character ceiling
+                assert length < 32767, f"Comando demasiado largo ({length} caracteres) para {worst_case}"
+
+    # Incluso en el peor caso (classroom con mapas y launch sin dock), debe ser < 20,000 chars
+    assert max_len < 20000, f"El peor caso ({worst_case}) es {max_len} caracteres, esperado < 20000"
+
+
+def test_dialog_and_message_box_dark_mode():
+    """Validates that modal dialogs and QMessageBox correctly respect dark mode with dark background and legible text."""
+    dark_pal = theme.create_theme_palette(is_dark=True)
+    assert dark_pal.color(QtGui.QPalette.ColorRole.Window).name() == "#0f172a"
+    assert dark_pal.color(QtGui.QPalette.ColorRole.WindowText).name() == "#f8fafc"
+
+    light_pal = theme.create_theme_palette(is_dark=False)
+    assert light_pal.color(QtGui.QPalette.ColorRole.Window).name() == "#f8fafc"
+    assert light_pal.color(QtGui.QPalette.ColorRole.WindowText).name() == "#0f172a"
+
+    # Test dark mode application
+    theme.apply_theme_to_application(is_dark=True)
+    assert theme.get_active_theme_mode() is True
+
+    msg_dark = QtWidgets.QMessageBox()
+    msg_dark.setWindowTitle("Simulación")
+    msg_dark.setText("Contenedor detenido correctamente.")
+    msg_dark.setIcon(QtWidgets.QMessageBox.Icon.Information)
+    msg_dark.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
+    msg_dark.show()
+    try:
+        pm_dark = QtGui.QPixmap(msg_dark.size())
+        msg_dark.render(pm_dark)
+        assert pm_dark.toImage().pixelColor(10, 10).name() == "#0f172a"
+
+        label_dark = msg_dark.findChild(QtWidgets.QLabel, "qt_msgbox_label")
+        assert label_dark is not None
+        assert label_dark.palette().color(label_dark.foregroundRole()).name() == "#f8fafc"
+    finally:
+        msg_dark.close()
+
+    # Test light mode application
+    theme.apply_theme_to_application(is_dark=False)
+    assert theme.get_active_theme_mode() is False
+
+    msg_light = QtWidgets.QMessageBox()
+    msg_light.setText("Texto en modo claro")
+    msg_light.show()
+    try:
+        pm_light = QtGui.QPixmap(msg_light.size())
+        msg_light.render(pm_light)
+        assert pm_light.toImage().pixelColor(10, 10).name() == "#f8fafc"
+
+        label_light = msg_light.findChild(QtWidgets.QLabel, "qt_msgbox_label")
+        assert label_light is not None
+        assert label_light.palette().color(label_light.foregroundRole()).name() == "#0f172a"
+    finally:
+        msg_light.close()
+
+
 if __name__ == "__main__":
     print("Running tests...")
     test_theme_palettes_and_stylesheet()
@@ -400,6 +570,15 @@ if __name__ == "__main__":
     print("[OK] test_dialog_stylesheets_and_variants passed")
     test_container_state_and_button_robustness()
     print("[OK] test_container_state_and_button_robustness passed")
-    print("\nAll 11 test suites passed successfully!")
+    test_docker_startup_progress_timer()
+    print("[OK] test_docker_startup_progress_timer passed")
+    test_docker_service_detection()
+    print("[OK] test_docker_service_detection passed")
+    test_docker_command_length_windows_limits()
+    print("[OK] test_docker_command_length_windows_limits passed")
+    test_dialog_and_message_box_dark_mode()
+    print("[OK] test_dialog_and_message_box_dark_mode passed")
+    print("\nAll 15 test suites passed successfully!")
+
 
 
