@@ -548,6 +548,8 @@ ENV ROBOT_MODEL=turtlebot4
 COPY turtlebot4_nodock.launch.py /opt/ros/humble/share/turtlebot4_ignition_bringup/launch/
 COPY worlds/ /opt/ros/humble/share/turtlebot4_ignition_bringup/worlds/
 COPY maps/ /opt/ros/humble/share/turtlebot4_navigation/maps/
+# Eliminar panel HMI innecesario en la GUI de Gazebo
+RUN sed -i '/<plugin filename=.*Hmi/,/<\/plugin>/d' /opt/ros/humble/share/turtlebot4_ignition_bringup/gui/*/gui.config
 LABEL org.nav_course.assets_digest="@ASSETS_DIGEST@"
 
 EXPOSE 6080

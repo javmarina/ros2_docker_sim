@@ -55,6 +55,8 @@ ENV ROBOT_MODEL=turtlebot4
 COPY turtlebot4_nodock.launch.py /opt/ros/humble/share/turtlebot4_ignition_bringup/launch/
 COPY worlds/ /opt/ros/humble/share/turtlebot4_ignition_bringup/worlds/
 COPY maps/ /opt/ros/humble/share/turtlebot4_navigation/maps/
+# Eliminar panel HMI innecesario en la GUI de Gazebo
+RUN sed -i '/<plugin filename=.*Hmi/,/<\/plugin>/d' /opt/ros/humble/share/turtlebot4_ignition_bringup/gui/*/gui.config
 LABEL org.nav_course.assets_digest="c567857cf0cb7b52"
 
 EXPOSE 6080
@@ -63,6 +65,6 @@ WORKDIR /ros2_ws
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc \
     && echo "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi" >> /root/.bashrc
 
-LABEL org.nav_course.dockerfile_hash="0be6d354f55e5a02"
+LABEL org.nav_course.dockerfile_hash="92306713d4df0faf"
 
 CMD ["/bin/bash"]
