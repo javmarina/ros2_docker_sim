@@ -32,11 +32,20 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Test Suite
-        shell: bash
+        shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          python -m pytest test_launcher.py -v --tb=short
+          python run_tests.py
+
+      - name: Upload Test Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: test-results.xml
+          if-no-files-found: ignore
+          retention-days: 14
 
   build:
     name: Build ros2_sim_launcher.exe

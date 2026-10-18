@@ -45,6 +45,12 @@ def _cleanup_qt_session():
             pass
         app_inst.closeAllWindows()
         QtWidgets.QApplication.processEvents()
+        try:
+            from PySide6 import QtCore
+            QtWidgets.QApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+        except Exception:
+            pass
+        QtWidgets.QApplication.processEvents()
 
 
 def test_theme_palettes_and_stylesheet():
