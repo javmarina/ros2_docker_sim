@@ -1,5 +1,5 @@
 """
-Servicio Docker para el Launcher de ROS 2 Jazzy.
+Servicio Docker para el Launcher de ROS 2 Humble.
 Gestiona el ciclo de vida del contenedor, volúmenes, descarga/construcción de imágenes
 y la apertura de terminales interactivas (Windows Terminal / PowerShell / CMD).
 """
@@ -70,15 +70,15 @@ class ContainerState(Enum):
         return self in (ContainerState.STARTING, ContainerState.STOPPING)
 
 
-DEFAULT_CONTAINER_NAME = "ros2_jazzy_nav_sim"
+DEFAULT_CONTAINER_NAME = "ros2_humble_nav_sim"
 DOCKERFILE_HASH_LABEL = "org.nav_course.dockerfile_hash"
-COURSE_IMAGE_NAME = "ros2-jazzy-nav-course:latest"
+COURSE_IMAGE_NAME = "ros2-humble-nav-course:latest"
 DEFAULT_NOVNC_PORT = 6080
 # Named volumes persisting colcon output -> mount point inside the container
 BUILD_CACHE_VOLUMES = {
-    "ros2_jazzy_build_cache": "/ros2_ws/build",
-    "ros2_jazzy_install_cache": "/ros2_ws/install",
-    "ros2_jazzy_log_cache": "/ros2_ws/log",
+    "ros2_humble_build_cache": "/ros2_ws/build",
+    "ros2_humble_install_cache": "/ros2_ws/install",
+    "ros2_humble_log_cache": "/ros2_ws/log",
 }
 WIN32_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 WIN32_NEW_CONSOLE = subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
@@ -607,7 +607,7 @@ class DockerService:
     @staticmethod
     def clean_build_volumes(timeout: float = 10.0) -> tuple[bool, str]:
         """Elimina los volúmenes persistentes de caché de compilación de colcon."""
-        logger.info("Eliminando volúmenes de caché ros2_jazzy_*...")
+        logger.info("Eliminando volúmenes de caché ros2_humble_*...")
         try:
             volumes = list(BUILD_CACHE_VOLUMES)
             for v in volumes:
@@ -642,7 +642,7 @@ class DockerService:
         logger.info("[Terminal] Sistema operativo detectado: %s", host_os)
 
         bash_init = (
-            "source /opt/ros/jazzy/setup.bash && "
+            "source /opt/ros/humble/setup.bash && "
             "test ! -f /ros2_ws/install/setup.bash || source /ros2_ws/install/setup.bash && "
             "cd /ros2_ws && exec bash"
         )
@@ -651,7 +651,7 @@ class DockerService:
             if host_os == "windows":
                 # Al pasar la orden como string simple a subprocess.Popen, Python no introduce barras de escape (\")
                 # con list2cmdline, permitiendo que 'start' reconozca correctamente el título y ejecute docker.
-                cmd = f'cmd.exe /c start "ROS 2 Jazzy - {container_name}" docker exec -it {container_name} bash'
+                cmd = f'cmd.exe /c start "ROS 2 Humble - {container_name}" docker exec -it {container_name} bash'
                 logger.info("[Terminal] Comando a ejecutar en Windows: %s", cmd)
                 proc = subprocess.Popen(cmd)
                 logger.info("[Terminal] Proceso lanzado con éxito. PID: %s", proc.pid)
@@ -707,7 +707,7 @@ class DockerService:
         cargando de forma segura el entorno de ROS 2 y el workspace.
         """
         full_cmd = (
-            "source /opt/ros/jazzy/setup.bash && "
+            "source /opt/ros/humble/setup.bash && "
             "test ! -f /ros2_ws/install/setup.bash || source /ros2_ws/install/setup.bash; "
             f"{command_str}"
         )
@@ -787,7 +787,7 @@ class DockerService:
             "-e",
             "OGRE_RTT_MODE=Copy",
             "-v",
-            "ros2_jazzy_gz_cache:/root/.gz",
+            "ros2_humble_ign_cache:/root/.ignition",
             *cls.build_cache_mount_args(),
             *cls.workspace_mount_args(ws_path),
         ]

@@ -1,6 +1,6 @@
-# ROS 2 Jazzy Simulation Launcher
+# ROS 2 Humble Simulation Launcher
 
-Herramienta de simulación y navegación con **ROS 2 Jazzy**, **Gazebo Sim** y **Navigation2 (Nav2)** para la asignatura de **Sistemas de Navegación** (La Salle URL).
+Herramienta de simulación y navegación con **ROS 2 Humble**, **Ignition Gazebo** y **Navigation2 (Nav2)** para la asignatura de **Sistemas de Navegación** (La Salle URL).
 
 Construida con **PySide6 (Qt6)** para una interfaz moderna, nítida y desacoplada de dependencias locales.
 

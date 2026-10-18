@@ -101,7 +101,7 @@ jobs:
           tag_name: latest
           name: "ROS 2 Launcher v${{ env.APP_VERSION }}"
           body: |
-            ## ROS 2 Jazzy Simulation Launcher (Windows Standalone)
+            ## ROS 2 Humble Simulation Launcher (Windows Standalone)
 
             Compilación automática generada desde el commit `${{ github.sha }}` de la rama `main`.
 

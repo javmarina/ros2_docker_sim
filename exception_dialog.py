@@ -206,7 +206,7 @@ class ExceptionModalDialog(QtWidgets.QDialog):
         subject = f"[Error Launcher ROS 2] {err_name} - v{CURRENT_VERSION}"
         body = (
             "Hola soporte,\n\n"
-            "Se ha producido el siguiente error en el Launcher de ROS 2 Jazzy:\n\n"
+            "Se ha producido el siguiente error en el Launcher de ROS 2 Humble:\n\n"
             f"{self.report_text}\n"
         )
         mailto_url = f"mailto:{SUPPORT_EMAIL}?subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"

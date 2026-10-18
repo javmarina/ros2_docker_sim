@@ -22,7 +22,7 @@ def _build_camera_pose_cmd(world_enum: SimulationWorld) -> str:
         cam_pose = "-6 0 6 0 0.5 0"
     return (
         f"sed -i 's|<camera_pose>[^<]*</camera_pose>|<camera_pose>{cam_pose}</camera_pose>|' "
-        "/opt/ros/jazzy/share/turtlebot4_gz_bringup/gui/*/gui.config"
+        "/opt/ros/humble/share/turtlebot4_ignition_bringup/gui/*/gui.config"
     )
 
 
@@ -200,16 +200,16 @@ class RobotProfile:
 
 def _build_env_prefix(force_rebuild: bool) -> str:  # noqa: ARG001 (kept for API symmetry)
     return (
-        "source /opt/ros/jazzy/setup.bash && "
+        "source /opt/ros/humble/setup.bash && "
         "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi"
     )
 
 
 def _build_container_only_command() -> str:
     return (
-        "source /opt/ros/jazzy/setup.bash && "
+        "source /opt/ros/humble/setup.bash && "
         "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi && "
-        'echo "=== Contenedor ROS 2 Jazzy listo en modo libre ===" && '
+        'echo "=== Contenedor ROS 2 Humble listo en modo libre ===" && '
         'echo "Espacio de trabajo montado en: /ros2_ws/src" && '
         'echo "Servidor gráfico noVNC listo en: http://localhost:6080/vnc.html" && '
         'echo "Puedes abrir terminales interactivas o ejecutar tus propios comandos." && '
@@ -242,11 +242,11 @@ def _build_turtlebot4_command(
             if SimulationWorld.has_map(world_enum)
             else "slam:=true"
         )
-        return f"{prefix} && ros2 launch turtlebot4_gz_bringup {launch_file} world:={actual_world} nav2:=true {loc_part} rviz:=true {launch_args}".strip()
+        return f"{prefix} && ros2 launch turtlebot4_ignition_bringup {launch_file} world:={actual_world} nav2:=true {loc_part} rviz:=true {launch_args}".strip()
     elif sc_str == ScenarioId.SLAM.value:
-        return f"{prefix} && ros2 launch turtlebot4_gz_bringup {launch_file} world:={actual_world} slam:=true nav2:=true rviz:=true {launch_args}".strip()
+        return f"{prefix} && ros2 launch turtlebot4_ignition_bringup {launch_file} world:={actual_world} slam:=true nav2:=true rviz:=true {launch_args}".strip()
     elif sc_str == ScenarioId.SIM_ONLY.value:
-        return f"{prefix} && ros2 launch turtlebot4_gz_bringup {launch_file} world:={actual_world} {launch_args}".strip()
+        return f"{prefix} && ros2 launch turtlebot4_ignition_bringup {launch_file} world:={actual_world} {launch_args}".strip()
     elif sc_str == ScenarioId.RVIZ2.value:
         return f"{env} && ros2 launch turtlebot4_viz view_robot.launch.py"
     elif sc_str == ScenarioId.TELEOP.value:
@@ -260,7 +260,7 @@ def _build_generic_command(
     scenario_id: str, world_name: str, extra_args: str, force_rebuild: bool
 ) -> str:
     env = (
-        "source /opt/ros/jazzy/setup.bash && "
+        "source /opt/ros/humble/setup.bash && "
         "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi"
     )
     args = extra_args.strip()
@@ -314,7 +314,7 @@ ROBOT_REGISTRY: dict[str, RobotProfile] = {
     "generic": RobotProfile(
         id=RobotId.BASE,
         name="Entorno base ROS 2 (Sin robot específico)",
-        description="Contenedor estándar con ROS 2 Jazzy y workspace montado, sin configuración de robot específico.",
+        description="Contenedor estándar con ROS 2 Humble y workspace montado, sin configuración de robot específico.",
         supported_worlds=[SimulationWorld.NOT_APPLICABLE.value],
         scenarios=[
             Scenario(

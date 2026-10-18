@@ -90,7 +90,7 @@ def test_dockerfile_sync():
         target_file = build_dir / "Dockerfile"
         assert target_file.is_file()
         content = target_file.read_text(encoding="utf-8")
-        assert "ros:jazzy-desktop-full" in content
+        assert "ros:humble-desktop-full" in content
         assert "org.nav_course.assets_digest" in content
         assert "COPY turtlebot4_nodock.launch.py" in content
         assert "COPY worlds/" in content
@@ -523,7 +523,7 @@ def test_docker_command_length_windows_limits():
             for sc in robot.scenarios:
                 cmd = robot.build_command(sc.id, world)
                 docker_cmd = DockerService.build_docker_run_args(
-                    "ros2-jazzy-nav-course:latest",
+                    "ros2-humble-nav-course:latest",
                     "test_container",
                     cmd,
                     "42",

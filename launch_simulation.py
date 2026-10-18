@@ -1,5 +1,5 @@
 """
-Launcher de Simulación ROS 2 Jazzy para la Asignatura de Robótica Móvil
+Launcher de Simulación ROS 2 Humble para la Asignatura de Robótica Móvil
 Punto de entrada principal de la aplicación con PySide6 y Docker.
 """
 

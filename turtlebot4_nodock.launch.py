@@ -88,29 +88,37 @@ for pose_element in ["x", "y", "z", "yaw"]:
 
 
 def generate_launch_description():
-    pkg_turtlebot4_gz_bringup = get_package_share_directory("turtlebot4_gz_bringup")
+    pkg_turtlebot4_ignition_bringup = get_package_share_directory(
+        "turtlebot4_ignition_bringup"
+    )
     pkg_turtlebot4_description = get_package_share_directory("turtlebot4_description")
     pkg_turtlebot4_viz = get_package_share_directory("turtlebot4_viz")
     pkg_turtlebot4_navigation = get_package_share_directory("turtlebot4_navigation")
     pkg_irobot_create_common_bringup = get_package_share_directory(
         "irobot_create_common_bringup"
     )
+    pkg_irobot_create_ignition_bringup = get_package_share_directory(
+        "irobot_create_ignition_bringup"
+    )
 
     # Launch file paths
-    gazebo_launch = PathJoinSubstitution(
-        [pkg_turtlebot4_gz_bringup, "launch", "sim.launch.py"]
+    ignition_launch = PathJoinSubstitution(
+        [pkg_turtlebot4_ignition_bringup, "launch", "ignition.launch.py"]
     )
     robot_description_launch = PathJoinSubstitution(
         [pkg_turtlebot4_description, "launch", "robot_description.launch.py"]
     )
-    turtlebot4_ros_gz_bridge_launch = PathJoinSubstitution(
-        [pkg_turtlebot4_gz_bringup, "launch", "ros_gz_bridge.launch.py"]
+    turtlebot4_ros_ign_bridge_launch = PathJoinSubstitution(
+        [pkg_turtlebot4_ignition_bringup, "launch", "ros_ign_bridge.launch.py"]
     )
     turtlebot4_node_launch = PathJoinSubstitution(
-        [pkg_turtlebot4_gz_bringup, "launch", "turtlebot4_nodes.launch.py"]
+        [pkg_turtlebot4_ignition_bringup, "launch", "turtlebot4_nodes.launch.py"]
     )
     create3_nodes_launch = PathJoinSubstitution(
         [pkg_irobot_create_common_bringup, "launch", "create3_nodes.launch.py"]
+    )
+    create3_ignition_nodes_launch = PathJoinSubstitution(
+        [pkg_irobot_create_ignition_bringup, "launch", "create3_ignition_nodes.launch.py"]
     )
     localization_launch = PathJoinSubstitution(
         [pkg_turtlebot4_navigation, "launch", "localization.launch.py"]
@@ -122,13 +130,13 @@ def generate_launch_description():
         [pkg_turtlebot4_navigation, "launch", "nav2.launch.py"]
     )
     rviz_launch = PathJoinSubstitution(
-        [pkg_turtlebot4_viz, "launch", "view_navigation.launch.py"]
+        [pkg_turtlebot4_viz, "launch", "view_robot.launch.py"]
     )
 
     param_file_cmd = DeclareLaunchArgument(
         "param_file",
         default_value=PathJoinSubstitution(
-            [pkg_turtlebot4_gz_bringup, "config", "turtlebot4_node.yaml"]
+            [pkg_turtlebot4_ignition_bringup, "config", "turtlebot4_node.yaml"]
         ),
         description="Turtlebot4 Robot param file",
     )
@@ -145,13 +153,11 @@ def generate_launch_description():
 
     robot_name = GetNamespacedName(namespace, "turtlebot4")
 
-    # 1. Gazebo simulation en el mundo seleccionado (sin dock)
+    # 1. Ignition Gazebo simulation en el mundo seleccionado (sin dock)
     gazebo = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([gazebo_launch]),
+        PythonLaunchDescriptionSource([ignition_launch]),
         launch_arguments=[
             ("world", world),
-            ("model", model),
-            ("use_sim_time", use_sim_time),
         ],
     )
 
@@ -164,7 +170,7 @@ def generate_launch_description():
                 launch_arguments=[("model", model), ("use_sim_time", use_sim_time)],
             ),
             Node(
-                package="ros_gz_sim",
+                package="ros_ign_gazebo",
                 executable="create",
                 arguments=[
                     "-name",
@@ -183,14 +189,13 @@ def generate_launch_description():
                 output="screen",
             ),
             IncludeLaunchDescription(
-                PythonLaunchDescriptionSource([turtlebot4_ros_gz_bridge_launch]),
+                PythonLaunchDescriptionSource([turtlebot4_ros_ign_bridge_launch]),
                 launch_arguments=[
                     ("model", model),
                     ("robot_name", robot_name),
                     ("dock_name", "standard_dock"),
                     ("namespace", namespace),
                     ("world", world),
-                    ("use_sim_time", use_sim_time),
                 ],
             ),
             IncludeLaunchDescription(
@@ -203,6 +208,13 @@ def generate_launch_description():
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([create3_nodes_launch]),
                 launch_arguments=[("namespace", namespace)],
+            ),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource([create3_ignition_nodes_launch]),
+                launch_arguments=[
+                    ("robot_name", robot_name),
+                    ("dock_name", "standard_dock"),
+                ],
             ),
             Node(
                 name="rplidar_stf",

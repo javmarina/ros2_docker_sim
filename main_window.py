@@ -76,7 +76,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     def __init__(self, enable_background_tasks: bool | None = None):
         super().__init__()
         self.setWindowTitle(
-            f"ROS 2 Jazzy - Launcher de simulación (v{CURRENT_VERSION}) | Sistemas de Navegación"
+            f"ROS 2 Humble - Launcher de simulación (v{CURRENT_VERSION}) | Sistemas de Navegación"
         )
         self.resize(1020, 680)
         self.setMinimumSize(880, 520)
@@ -2241,7 +2241,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             COURSE_IMAGE_NAME,
             "/bin/bash",
             "-c",
-            "source /opt/ros/jazzy/setup.bash && cd /ros2_ws && colcon build --symlink-install",
+            "source /opt/ros/humble/setup.bash && cd /ros2_ws && colcon build --symlink-install",
         ]
         self.compile_runner = ProcessRunnerThread(build_cmd)
         self.compile_runner.signals.line_received.connect(self._append_log)
