@@ -158,6 +158,7 @@ def generate_launch_description():
         PythonLaunchDescriptionSource([ignition_launch]),
         launch_arguments=[
             ("world", world),
+            ("model", model),
         ],
     )
 

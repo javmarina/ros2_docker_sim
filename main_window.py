@@ -106,6 +106,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self._is_loading_preferences = True
 
         self._container_state: ContainerState = ContainerState.NOT_RUNNING
+        self._simulation_ready: bool = False
         self._container_miss_count = 0
         self._is_checking_container: bool = False
         self._container_poll_timer: QtCore.QTimer | None = None
@@ -1337,6 +1338,8 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         changed = self._container_state != new_state
         self._container_state = new_state
+        if new_state != ContainerState.RUNNING:
+            self._simulation_ready = False
         if changed:
             logger.info("Estado del contenedor: %s", new_state.value)
         self._update_action_buttons_state()
@@ -1394,13 +1397,18 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self.btn_stop.setToolTip(
                 "Detiene y elimina el contenedor Docker en ejecución."
             )
-            self.prog_bar.setRange(0, 100)
-            self.prog_bar.setValue(100)
-            self.lbl_progress.setText(
-                "Contenedor en ejecución"
-                if is_container_only
-                else "Simulación en ejecución"
-            )
+            if is_container_only:
+                self.prog_bar.setRange(0, 100)
+                self.prog_bar.setValue(100)
+                self.lbl_progress.setText("Contenedor en ejecución")
+            else:
+                if not getattr(self, "_simulation_ready", False):
+                    self.prog_bar.setRange(0, 0)
+                    self.lbl_progress.setText("Inicializando Gazebo...")
+                else:
+                    self.prog_bar.setRange(0, 100)
+                    self.prog_bar.setValue(100)
+                    self.lbl_progress.setText("Simulación en ejecución")
         else:
             self.prog_bar.setRange(0, 100)
             self.prog_bar.setValue(0)
@@ -2066,6 +2074,14 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                     self._append_log(f"\n[Error durante la ejecución: {err}]\n")
                     self.sig_container_status.emit(ContainerState.NOT_RUNNING)
 
+                self._simulation_ready = False
+                if not is_container_only and world_name != SimulationWorld.EMPTY.value:
+                    self._append_log(
+                        f"[INFO] Cargando mundo '{world_name}'. En entornos virtualizados por software (CPU),\n"
+                        "la inicialización de la física de Gazebo y el spawner del robot pueden tardar entre 30 y 50 segundos.\n"
+                        "Los mensajes de 'waiting for controller_manager' durante este periodo son parte del sondeo normal.\n\n"
+                    )
+
                 self.active_sim_thread = ProcessRunnerThread(docker_cmd)
                 self.active_sim_thread.signals.line_received.connect(self._append_log)
                 self.active_sim_thread.signals.finished.connect(_on_sim_finished)
@@ -2522,6 +2538,23 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         cursor = self.txt_logs.textCursor()
         cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
         self.ansi_parser.parse_to_cursor(text, cursor)
+
+        if (
+            not getattr(self, "_simulation_ready", False)
+            and self._container_state == ContainerState.RUNNING
+        ):
+            if "diffdrive_controller" in text and (
+                "Configured and activated" in text or "Loaded" in text
+            ):
+                self._simulation_ready = True
+                self.prog_bar.setRange(0, 100)
+                self.prog_bar.setValue(100)
+                self.lbl_progress.setText("Simulación en ejecución")
+            elif (
+                "Requesting list of world names" in text
+                or "waiting for service /controller_manager" in text
+            ):
+                self.lbl_progress.setText("Cargando física y modelos Gazebo...")
 
         if self.autoscroll_enabled:
             self._scroll_to_bottom()

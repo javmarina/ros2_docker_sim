@@ -786,6 +786,14 @@ class DockerService:
             "QT_QPA_PLATFORM=xcb",
             "-e",
             "OGRE_RTT_MODE=Copy",
+            "-e",
+            f"LP_NUM_THREADS={os.cpu_count() or 4}",
+            "-e",
+            "IGN_GAZEBO_RESOURCE_PATH=/opt/ros/humble/share/turtlebot4_ignition_bringup/worlds:/opt/ros/humble/share/irobot_create_ignition_bringup/worlds:/opt/ros/humble/share",
+            "-e",
+            "GZ_SIM_RESOURCE_PATH=/opt/ros/humble/share/turtlebot4_ignition_bringup/worlds:/opt/ros/humble/share/irobot_create_ignition_bringup/worlds:/opt/ros/humble/share",
+            "-e",
+            "IGN_GUI_PLUGIN_PATH=/opt/ros/humble/share/turtlebot4_ignition_gui_plugins/lib:/opt/ros/humble/share/irobot_create_ignition_plugins/lib",
             "-v",
             "ros2_humble_ign_cache:/root/.ignition",
             *cls.build_cache_mount_args(),
@@ -795,6 +803,7 @@ class DockerService:
         # Comando interno de inicialización de display virtual + servidor noVNC + ROS2
         final_shell_cmd = (
             "rm -rf /dev/shm/fastrtps* /dev/shm/sem.fastrtps* >/dev/null 2>&1; "
+            "mkdir -p /root/.ignition/fuel && printf -- '---\\nservers: []\\ncache:\\n  path: /root/.ignition/fuel\\n' > /root/.ignition/fuel/config.yaml; "
             "Xvfb :99 -screen 0 1600x900x24 >/dev/null 2>&1 & "
             "sleep 1 && "
             "openbox >/dev/null 2>&1 & "

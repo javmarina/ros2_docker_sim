@@ -201,7 +201,9 @@ class RobotProfile:
 def _build_env_prefix(force_rebuild: bool) -> str:  # noqa: ARG001 (kept for API symmetry)
     return (
         "source /opt/ros/humble/setup.bash && "
-        "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi"
+        "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi && "
+        "export IGN_GAZEBO_RESOURCE_PATH=/opt/ros/humble/share/turtlebot4_ignition_bringup/worlds:/opt/ros/humble/share/irobot_create_ignition_bringup/worlds:/opt/ros/humble/share:${IGN_GAZEBO_RESOURCE_PATH} && "
+        "export GZ_SIM_RESOURCE_PATH=/opt/ros/humble/share/turtlebot4_ignition_bringup/worlds:/opt/ros/humble/share/irobot_create_ignition_bringup/worlds:/opt/ros/humble/share:${GZ_SIM_RESOURCE_PATH}"
     )
 
 

@@ -543,6 +543,14 @@ RUN echo "=== [1/3] Actualizando repositorios APT ===" && \
     && rm -rf /var/lib/apt/lists/*
 
 ENV ROBOT_MODEL=turtlebot4
+ENV LP_NUM_THREADS=8
+ENV IGN_GAZEBO_RESOURCE_PATH=/opt/ros/humble/share/turtlebot4_ignition_bringup/worlds:/opt/ros/humble/share/irobot_create_ignition_bringup/worlds:/opt/ros/humble/share
+ENV GZ_SIM_RESOURCE_PATH=/opt/ros/humble/share/turtlebot4_ignition_bringup/worlds:/opt/ros/humble/share/irobot_create_ignition_bringup/worlds:/opt/ros/humble/share
+ENV IGN_GUI_PLUGIN_PATH=/opt/ros/humble/share/turtlebot4_ignition_gui_plugins/lib:/opt/ros/humble/share/irobot_create_ignition_plugins/lib
+
+# Configurar Ignition Fuel en modo local/offline para evitar latencias de red y chequeos DNS externos
+RUN mkdir -p /root/.ignition/fuel && \
+    printf -- "---\nservers: []\ncache:\n  path: /root/.ignition/fuel\n" > /root/.ignition/fuel/config.yaml
 
 # Launch file sin dock, mundos (SDF) y mapas (YAML/PNG) de la asignatura
 COPY turtlebot4_nodock.launch.py /opt/ros/humble/share/turtlebot4_ignition_bringup/launch/

@@ -50,6 +50,14 @@ RUN echo "=== [1/3] Actualizando repositorios APT ===" && \
     && rm -rf /var/lib/apt/lists/*
 
 ENV ROBOT_MODEL=turtlebot4
+ENV LP_NUM_THREADS=8
+ENV IGN_GAZEBO_RESOURCE_PATH=/opt/ros/humble/share/turtlebot4_ignition_bringup/worlds:/opt/ros/humble/share/irobot_create_ignition_bringup/worlds:/opt/ros/humble/share
+ENV GZ_SIM_RESOURCE_PATH=/opt/ros/humble/share/turtlebot4_ignition_bringup/worlds:/opt/ros/humble/share/irobot_create_ignition_bringup/worlds:/opt/ros/humble/share
+ENV IGN_GUI_PLUGIN_PATH=/opt/ros/humble/share/turtlebot4_ignition_gui_plugins/lib:/opt/ros/humble/share/irobot_create_ignition_plugins/lib
+
+# Configurar Ignition Fuel en modo local/offline para evitar latencias de red y chequeos DNS externos
+RUN mkdir -p /root/.ignition/fuel && \
+    printf -- "---\nservers: []\ncache:\n  path: /root/.ignition/fuel\n" > /root/.ignition/fuel/config.yaml
 
 # Launch file sin dock, mundos (SDF) y mapas (YAML/PNG) de la asignatura
 COPY turtlebot4_nodock.launch.py /opt/ros/humble/share/turtlebot4_ignition_bringup/launch/
@@ -57,7 +65,7 @@ COPY worlds/ /opt/ros/humble/share/turtlebot4_ignition_bringup/worlds/
 COPY maps/ /opt/ros/humble/share/turtlebot4_navigation/maps/
 # Eliminar panel HMI innecesario en la GUI de Gazebo
 RUN sed -i '/<plugin filename=.*Hmi/,/<\/plugin>/d' /opt/ros/humble/share/turtlebot4_ignition_bringup/gui/*/gui.config
-LABEL org.nav_course.assets_digest="c567857cf0cb7b52"
+LABEL org.nav_course.assets_digest="3a66ec32d9b62ee2"
 
 EXPOSE 6080
 WORKDIR /ros2_ws
@@ -65,6 +73,6 @@ WORKDIR /ros2_ws
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc \
     && echo "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi" >> /root/.bashrc
 
-LABEL org.nav_course.dockerfile_hash="92306713d4df0faf"
+LABEL org.nav_course.dockerfile_hash="09d150ac4d60f86d"
 
 CMD ["/bin/bash"]
