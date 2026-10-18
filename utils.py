@@ -554,7 +554,20 @@ ENV ROBOT_MODEL=turtlebot4
 COPY turtlebot4_nodock.launch.py /opt/ros/jazzy/share/turtlebot4_gz_bringup/launch/
 COPY worlds/ /opt/ros/jazzy/share/turtlebot4_gz_bringup/worlds/
 COPY maps/ /opt/ros/jazzy/share/turtlebot4_navigation/maps/
-RUN sed -i '/<plugin filename=.*Hmi/,/<\/plugin>/d' /opt/ros/jazzy/share/turtlebot4_gz_bringup/gui/*/gui.config
+# Optimizaciones y parches para simulación:
+# 1. Eliminar panel HMI innecesario en la GUI de Gazebo
+# 2. Aumentar timeout del gestor de controladores a 120s para arranques pesados
+# 3. Remapear /cmd_vel a Twist sin estampar (geometry_msgs/msg/Twist) para compatibilidad
+#    directa con teleop estándar y nodos de alumnos (slalom_node, etc.)
+RUN sed -i '/<plugin filename=.*Hmi/,/<\/plugin>/d' /opt/ros/jazzy/share/turtlebot4_gz_bringup/gui/*/gui.config && \
+    sed -i "s/'--controller-manager-timeout', '30'/'--controller-manager-timeout', '120'/g" /opt/ros/jazzy/share/irobot_create_control/launch/include/control.py && \
+    python3 -c "import pathlib; \
+p1=pathlib.Path('/opt/ros/jazzy/share/irobot_create_common_bringup/launch/create3_nodes.launch.py'); \
+p1.write_text(p1.read_text().replace(\"('/tf_static', 'tf_static')\", \"('/tf_static', 'tf_static'), ('cmd_vel', 'cmd_vel_stamped'), ('cmd_vel_unstamped', 'cmd_vel')\")); \
+p2=pathlib.Path('/opt/ros/jazzy/share/irobot_create_gz_bringup/launch/create3_ros_gz_bridge.launch.py'); \
+p2.write_text(p2.read_text().replace(\"([namespace, '/cmd_vel'], 'cmd_vel')\", \"([namespace, '/cmd_vel'], 'cmd_vel_stamped')\")); \
+p3=pathlib.Path('/opt/ros/jazzy/share/turtlebot4_navigation/config/nav2.yaml'); \
+p3.write_text(p3.read_text().replace('enable_stamped_cmd_vel: true', 'enable_stamped_cmd_vel: false'))"
 LABEL org.nav_course.assets_digest="@ASSETS_DIGEST@"
 
 EXPOSE 6080

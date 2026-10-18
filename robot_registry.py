@@ -15,19 +15,14 @@ _MAPS_DIR = Path(__file__).parent / "maps"
 
 
 def _build_camera_pose_cmd(world_enum: SimulationWorld) -> str:
-    """Comando que ajusta la cámara, oculta el panel HMI y asegura la configuración limpia de Gazebo."""
+    """Comando que ajusta la postura de la cámara GUI de Gazebo según el mundo."""
     if world_enum == SimulationWorld.CLASSROOM:
         cam_pose = "-2.5 10.5 9.0 0.0 0.675 -0.719"
     else:
         cam_pose = "-6 0 6 0 0.5 0"
     return (
-        f"sed -i -e 's|<camera_pose>[^<]*</camera_pose>|<camera_pose>{cam_pose}</camera_pose>|' "
-        "-e '/<plugin filename=.*Hmi/,/<\\/plugin>/d' "
-        "/opt/ros/jazzy/share/turtlebot4_gz_bringup/gui/*/gui.config && "
-        "sed -i '/<gui fullscreen/,/<\\/gui>/d' "
-        "/opt/ros/jazzy/share/turtlebot4_gz_bringup/worlds/classroom.sdf 2>/dev/null || true && "
-        "sed -i \"s/'--controller-manager-timeout', '30'/'--controller-manager-timeout', '120'/g\" "
-        "/opt/ros/jazzy/share/irobot_create_control/launch/include/control.py 2>/dev/null || true"
+        f"sed -i 's|<camera_pose>[^<]*</camera_pose>|<camera_pose>{cam_pose}</camera_pose>|' "
+        "/opt/ros/jazzy/share/turtlebot4_gz_bringup/gui/*/gui.config"
     )
 
 
@@ -255,8 +250,8 @@ def _build_turtlebot4_command(
     elif sc_str == ScenarioId.RVIZ2.value:
         return f"{env} && ros2 launch turtlebot4_viz view_robot.launch.py"
     elif sc_str == ScenarioId.TELEOP.value:
-        teleop_args = f"-p stamped:=true {args}".strip()
-        return f"{env} && ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args {teleop_args}".strip()
+        extra = f"--ros-args {args.strip()}".strip() if args.strip() else ""
+        return f"{env} && ros2 run teleop_twist_keyboard teleop_twist_keyboard {extra}".strip()
     else:  # ScenarioId.CONTAINER_ONLY, "bash"
         return _build_container_only_command()
 
