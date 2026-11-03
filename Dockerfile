@@ -3,6 +3,8 @@ FROM osrf/ros:humble-desktop-full
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV RCUTILS_COLORIZED_OUTPUT=1
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ENV ROS_DOMAIN_ID=0
 
 # Install Navigation2, SLAM Toolbox, TurtleBot4 dependencies, and Ignition Gazebo
 RUN echo "=== [1/3] Actualizando repositorios APT ===" && \
@@ -28,6 +30,7 @@ RUN echo "=== [1/3] Actualizando repositorios APT ===" && \
         ros-humble-controller-manager \
         ros-humble-ros2-control \
         ros-humble-ros2-controllers \
+        ros-humble-rmw-cyclonedds-cpp \
         python3-colcon-common-extensions \
         python3-rosdep \
         x11-apps \
@@ -73,6 +76,6 @@ WORKDIR /ros2_ws
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc \
     && echo "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi" >> /root/.bashrc
 
-LABEL org.nav_course.dockerfile_hash="09d150ac4d60f86d"
+LABEL org.nav_course.dockerfile_hash="0d96433f96480d9f"
 
 CMD ["/bin/bash"]

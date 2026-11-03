@@ -1095,7 +1095,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self._on_scenario_changed()
 
             self.ent_domain_id.setText(
-                str(self.config_store.get("ros_domain_id", "42"))
+                str(self.config_store.get("ros_domain_id", "0"))
             )
             self.ent_web_port.setText(
                 str(self.config_store.get("web_port", str(DEFAULT_NOVNC_PORT)))
@@ -2039,7 +2039,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 )
                 extra_args = self.ent_extra_args.text().strip()
                 force_rebuild = self.chk_force_rebuild.isChecked()
-                domain_id = self.ent_domain_id.text().strip() or "42"
+                domain_id = self.ent_domain_id.text().strip() or "0"
                 ws_path = self.ent_ws_path.text().strip()
                 web_port = self.ent_web_port.text().strip() or str(DEFAULT_NOVNC_PORT)
 

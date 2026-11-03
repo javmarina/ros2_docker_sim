@@ -496,6 +496,8 @@ FROM osrf/ros:humble-desktop-full
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV RCUTILS_COLORIZED_OUTPUT=1
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ENV ROS_DOMAIN_ID=0
 
 # Install Navigation2, SLAM Toolbox, TurtleBot4 dependencies, and Ignition Gazebo
 RUN echo "=== [1/3] Actualizando repositorios APT ===" && \
@@ -521,6 +523,7 @@ RUN echo "=== [1/3] Actualizando repositorios APT ===" && \
         ros-humble-controller-manager \
         ros-humble-ros2-control \
         ros-humble-ros2-controllers \
+        ros-humble-rmw-cyclonedds-cpp \
         python3-colcon-common-extensions \
         python3-rosdep \
         x11-apps \

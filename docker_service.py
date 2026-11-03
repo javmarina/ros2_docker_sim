@@ -767,6 +767,8 @@ class DockerService:
             "-e",
             f"ROS_DOMAIN_ID={domain_id}",
             "-e",
+            "RMW_IMPLEMENTATION=rmw_cyclonedds_cpp",
+            "-e",
             f"ROBOT_MODEL={robot_model}",
             "-e",
             "RCUTILS_COLORIZED_OUTPUT=1",

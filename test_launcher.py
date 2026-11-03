@@ -97,6 +97,9 @@ def test_dockerfile_sync():
         assert target_file.is_file()
         content = target_file.read_text(encoding="utf-8")
         assert "ros:humble-desktop-full" in content
+        assert "ros-humble-rmw-cyclonedds-cpp" in content
+        assert "RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" in content
+        assert "ROS_DOMAIN_ID=0" in content
         assert "org.nav_course.assets_digest" in content
         assert "COPY turtlebot4_nodock.launch.py" in content
         assert "COPY worlds/" in content
@@ -104,6 +107,27 @@ def test_dockerfile_sync():
         assert (build_dir / "turtlebot4_nodock.launch.py").is_file()
         assert (build_dir / "worlds").is_dir()
         assert (build_dir / "maps").is_dir()
+
+
+def test_cyclonedds_and_domain_id_configuration():
+    """Validates that CycloneDDS and ROS_DOMAIN_ID=0 are configured across services and defaults."""
+    from config_store import ConfigStore
+    from docker_service import DockerService
+
+    assert ConfigStore.DEFAULTS.get("ros_domain_id") == "0"
+    args = DockerService.build_docker_run_args(
+        "ros2-humble-nav-course:latest",
+        "test_container",
+        "true",
+        "0",
+        "turtlebot4",
+        "C:/fake/ws",
+    )
+    assert "-e" in args and "ROS_DOMAIN_ID=0" in args
+    assert "RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" in args
+
+    assert "ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" in utils.DOCKERFILE_CONTENT
+    assert "ENV ROS_DOMAIN_ID=0" in utils.DOCKERFILE_CONTENT
 
 
 def test_exception_report_builder():
@@ -624,6 +648,8 @@ if __name__ == "__main__":
     print("[OK] test_ansi_color_parser passed")
     test_dockerfile_sync()
     print("[OK] test_dockerfile_sync passed")
+    test_cyclonedds_and_domain_id_configuration()
+    print("[OK] test_cyclonedds_and_domain_id_configuration passed")
     test_exception_report_builder()
     print("[OK] test_exception_report_builder passed")
     test_physical_tab_widget()
@@ -648,4 +674,4 @@ if __name__ == "__main__":
     print("[OK] test_docker_command_length_windows_limits passed")
     test_dialog_and_message_box_dark_mode()
     print("[OK] test_dialog_and_message_box_dark_mode passed")
-    print("\nAll 15 test suites passed successfully!")
+    print("\nAll 16 test suites passed successfully!")

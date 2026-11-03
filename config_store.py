@@ -25,7 +25,7 @@ class ConfigStore:
         "robot_id": RobotId.BASE.value,
         "scenario_id": ScenarioId.CONTAINER_ONLY.value,
         "world_name": SimulationWorld.EMPTY.value,
-        "ros_domain_id": "42",
+        "ros_domain_id": "0",
         "web_port": "6080",
         "extra_args": "use_sim_time:=true",
         "force_rebuild": False,
