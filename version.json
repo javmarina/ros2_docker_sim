@@ -1,7 +1,7 @@
 {
-  "version": "3.5.1",
+  "version": "3.6.0",
   "release_date": "2026-10-18",
-  "changelog": " * Nuevos mundos de simulación\n * Usar ROS 2 Humble para compatibilidad con TurtleBot 4 del laboratorio\n * Corrección de errores",
+  "changelog": "Botón en la pestaña 'Turtlebot 4' para ejecutar RViz conectado al robot",
   "download_url": "https://github.com/javmarina/ros2_docker_sim/releases/latest/download/ros2_sim_launcher.exe",
   "archive_url": "https://github.com/javmarina/ros2_docker_sim/archive/refs/heads/main.zip"
 }
