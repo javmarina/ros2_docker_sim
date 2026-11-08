@@ -750,10 +750,13 @@ class DockerService:
         robot_model: str,
         ws_path: str,
         web_port: str = "6080",
+        peer_ip: str | None = None,
     ) -> list[str]:
         """
         Construye la lista de argumentos para ejecutar el contenedor de simulación
         garantizando un montaje de volúmenes seguro en Windows y variables de visualización virtual.
+        Si se especifica peer_ip, configura el descubrimiento DDS por unicast directo (CycloneDDS)
+        para comunicar con robots físicos en la red local sin depender de multicast.
         """
         docker_cmd = [
             "docker",
@@ -796,15 +799,47 @@ class DockerService:
             "GZ_SIM_RESOURCE_PATH=/opt/ros/humble/share/turtlebot4_ignition_bringup/worlds:/opt/ros/humble/share/irobot_create_ignition_bringup/worlds:/opt/ros/humble/share",
             "-e",
             "IGN_GUI_PLUGIN_PATH=/opt/ros/humble/share/turtlebot4_ignition_gui_plugins/lib:/opt/ros/humble/share/irobot_create_ignition_plugins/lib",
+        ]
+
+        dds_setup_cmd = ""
+        if peer_ip and peer_ip.strip():
+            clean_ip = peer_ip.strip()
+            docker_cmd.extend([
+                "-e",
+                "CYCLONEDDS_URI=file:///etc/cyclonedds.xml",
+            ])
+            cyclone_xml = (
+                '<?xml version="1.0" encoding="UTF-8" ?>'
+                '<CycloneDDS xmlns="https://cdds.io/config">'
+                '<Domain id="any">'
+                '<General>'
+                '<NetworkInterfaceAddress>auto</NetworkInterfaceAddress>'
+                '<AllowMulticast>true</AllowMulticast>'
+                '</General>'
+                '<Discovery>'
+                '<Peers>'
+                f'<Peer address="{clean_ip}"/>'
+                '</Peers>'
+                '<ParticipantIndex>auto</ParticipantIndex>'
+                '</Discovery>'
+                '</Domain>'
+                '</CycloneDDS>'
+            )
+            dds_setup_cmd = (
+                f"printf -- '%s' '{cyclone_xml}' > /etc/cyclonedds.xml 2>/dev/null || printf -- '%s' '{cyclone_xml}' > /tmp/cyclonedds.xml; "
+                "echo 'export CYCLONEDDS_URI=file:///etc/cyclonedds.xml' >> /etc/bash.bashrc 2>/dev/null || true; "
+            )
+
+        docker_cmd.extend([
             "-v",
             "ros2_humble_ign_cache:/root/.ignition",
             *cls.build_cache_mount_args(),
             *cls.workspace_mount_args(ws_path),
-        ]
+        ])
 
         # Comando interno de inicialización de display virtual + servidor noVNC + ROS2
         final_shell_cmd = (
-            "rm -rf /dev/shm/fastrtps* /dev/shm/sem.fastrtps* >/dev/null 2>&1; "
+            f"{dds_setup_cmd}"
             "mkdir -p /root/.ignition/fuel && printf -- '---\\nservers: []\\ncache:\\n  path: /root/.ignition/fuel\\n' > /root/.ignition/fuel/config.yaml; "
             "Xvfb :99 -screen 0 1600x900x24 >/dev/null 2>&1 & "
             "sleep 1 && "

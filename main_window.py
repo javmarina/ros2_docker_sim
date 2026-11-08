@@ -6,6 +6,7 @@ import logging
 import os
 import shutil
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
@@ -90,7 +91,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self._enable_background_tasks = enable_background_tasks
         self._is_closing = False
 
-        self.config_store = ConfigStore(fallback_dir=Path(__file__).parent.resolve())
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            test_cfg_dir = Path(tempfile.gettempdir()) / "pytest_ros2_launcher"
+            self.config_store = ConfigStore(config_dir=test_cfg_dir)
+        else:
+            self.config_store = ConfigStore(fallback_dir=Path(__file__).parent.resolve())
         self.active_sim_thread: ProcessRunnerThread | None = None
         self.active_cmd_thread: ProcessRunnerThread | None = None
         self.compile_runner: ProcessRunnerThread | None = None
@@ -630,6 +635,9 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         )
         self.physical_tab.sig_show_info.connect(self._show_info_box)
         self.physical_tab.sig_show_warning.connect(self._show_warning_box)
+        self.physical_tab.sig_launch_physical_rviz.connect(
+            self.launch_physical_robot_rviz
+        )
         self.tab_physical.setWidget(self.physical_tab)
         self.tab_widget.addTab(self.tab_physical, QtGui.QIcon(), "TurtleBot 4")
 
@@ -639,10 +647,12 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.ent_robot_password = self.physical_tab.ent_robot_password
         self.ent_robot_port = self.physical_tab.ent_robot_port
         self.ent_robot_ws = self.physical_tab.ent_robot_ws
+        self.ent_robot_domain_id = self.physical_tab.ent_robot_domain_id
         self.btn_scan_robot = self.physical_tab.btn_scan_robot
         self.btn_robot_scp = self.physical_tab.btn_robot_scp
         self.btn_robot_compile = self.physical_tab.btn_robot_compile
         self.btn_robot_terminal = self.physical_tab.btn_robot_terminal
+        self.btn_robot_rviz = self.physical_tab.btn_robot_rviz
         self.lbl_wifi_badge = self.physical_tab.lbl_wifi_badge
         self.lbl_robot_badge = self.physical_tab.lbl_robot_badge
 
@@ -2131,6 +2141,198 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
             except Exception as e:
                 self._append_log(f"\n[Error durante el arranque: {e}]\n")
+                self.sig_container_status.emit(ContainerState.NOT_RUNNING)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def launch_physical_robot_rviz(
+        self, robot_ip: str | None = None, domain_id: str | None = None
+    ):
+        """
+        Inicia el contenedor Docker con RViz2 configurado para conectarse al TurtleBot 4
+        físico mediante DDS unicast discovery (CycloneDDS peer list).
+        Abre automáticamente la interfaz noVNC en el navegador web del alumno.
+        """
+        ip_to_use = (
+            robot_ip
+            if robot_ip is not None
+            else (
+                getattr(self, "physical_tab", None)
+                and self.physical_tab.ent_robot_ip.text().strip()
+            )
+            or ""
+        )
+        if not ip_to_use:
+            self._show_warning_box(
+                "TurtleBot 4",
+                "Por favor introduce o escanea la dirección IP del TurtleBot 4 antes de iniciar RViz2.",
+            )
+            return
+
+        if self._docker_state == DockerState.STARTING:
+            self._show_warning_box(
+                "Docker",
+                "Docker Desktop se está iniciando en este momento.\nPor favor espera a que finalice el arranque.",
+            )
+            return
+
+        if self._container_state in (ContainerState.STARTING, ContainerState.STOPPING):
+            return
+
+        if self._container_state == ContainerState.RUNNING:
+            ans = QtWidgets.QMessageBox.question(
+                self,
+                "Contenedor en ejecución",
+                "Ya hay una simulación o contenedor en ejecución.\n¿Deseas detenerlo para abrir RViz2 conectado al robot físico?",
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if ans != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+            DockerService.stop_container(DEFAULT_CONTAINER_NAME)
+
+        running, err = DockerService.check_docker_running(timeout=4.0)
+        if not running:
+            ans = QtWidgets.QMessageBox.question(
+                self,
+                "Docker no está en ejecución",
+                f"Docker no está en ejecución:\n\n{err}\n\n¿Deseas arrancar Docker Desktop ahora?",
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if ans == QtWidgets.QMessageBox.StandardButton.Yes:
+                self._start_docker_desktop()
+            return
+
+        dom_to_use = (
+            domain_id
+            if domain_id is not None
+            else (
+                (
+                    getattr(self, "physical_tab", None)
+                    and self.physical_tab.ent_robot_domain_id.text().strip()
+                )
+                or (
+                    hasattr(self, "ent_domain_id")
+                    and self.ent_domain_id.text().strip()
+                )
+                or "0"
+            )
+        )
+        web_port = (
+            self.ent_web_port.text().strip()
+            if hasattr(self, "ent_web_port") and self.ent_web_port.text().strip()
+            else str(DEFAULT_NOVNC_PORT)
+        )
+        ws_path = (
+            self.ent_ws_path.text().strip()
+            if hasattr(self, "ent_ws_path")
+            else ""
+        )
+        image_name = COURSE_IMAGE_NAME
+
+        self.tab_widget.setCurrentIndex(1)  # Tab Logs
+        self._append_log("\n" + "=" * 55 + "\n")
+        self._append_log("Iniciando RViz2 para TurtleBot 4 físico (noVNC)...\n")
+        self._append_log(f"Robot IP: {ip_to_use} | ROS_DOMAIN_ID: {dom_to_use}\n")
+        self._append_log(
+            f"Configurando DDS Peer Unicast directo hacia {ip_to_use}...\n"
+        )
+        self._append_log("=" * 55 + "\n")
+
+        self.sig_container_status.emit(ContainerState.STARTING)
+
+        def _worker():
+            try:
+                if not DockerService.is_image_available(image_name):
+                    self._append_log(
+                        f"Imagen '{image_name}' no encontrada localmente. Iniciando preparación...\n"
+                    )
+                    self.sig_container_status.emit(ContainerState.NOT_RUNNING)
+                    QtCore.QMetaObject.invokeMethod(
+                        self,
+                        "_prompt_initial_image_build",
+                        QtCore.Qt.ConnectionType.QueuedConnection,
+                    )
+                    return
+
+                DockerService.stop_container(DEFAULT_CONTAINER_NAME)
+
+                ros_cmd = (
+                    "source /opt/ros/humble/setup.bash && "
+                    "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi && "
+                    "(ros2 launch turtlebot4_viz view_robot.launch.py || rviz2)"
+                )
+
+                docker_cmd = DockerService.build_docker_run_args(
+                    image_name=image_name,
+                    container_name=DEFAULT_CONTAINER_NAME,
+                    ros_cmd=ros_cmd,
+                    domain_id=dom_to_use,
+                    robot_model="turtlebot4",
+                    ws_path=ws_path,
+                    web_port=web_port,
+                    peer_ip=ip_to_use,
+                )
+
+                self._append_log(
+                    f"Comando Docker generado (Modo Robot Físico):\n{' '.join(docker_cmd)}\n\n"
+                )
+
+                def _on_sim_finished(rc):
+                    self._append_log(
+                        f"\n[El proceso RViz2 finalizó con código de salida {rc}]\n"
+                    )
+                    self.sig_container_status.emit(ContainerState.NOT_RUNNING)
+
+                def _on_sim_error(err):
+                    self._append_log(
+                        f"\n[Error durante la ejecución de RViz2: {err}]\n"
+                    )
+                    self.sig_container_status.emit(ContainerState.NOT_RUNNING)
+
+                self._simulation_ready = False
+                self.active_sim_thread = ProcessRunnerThread(docker_cmd)
+                self.active_sim_thread.signals.line_received.connect(self._append_log)
+                self.active_sim_thread.signals.finished.connect(_on_sim_finished)
+                self.active_sim_thread.signals.error.connect(_on_sim_error)
+                self.active_sim_thread.start()
+
+                max_startup_seconds = 15.0
+                poll_interval = 0.4
+                elapsed = 0.0
+                container_started = False
+
+                while elapsed < max_startup_seconds:
+                    if (
+                        not self.active_sim_thread
+                        or not self.active_sim_thread.isRunning()
+                    ):
+                        break
+                    if DockerService.is_container_running(
+                        DEFAULT_CONTAINER_NAME, timeout=1.5
+                    ):
+                        container_started = True
+                        break
+                    time.sleep(poll_interval)
+                    elapsed += poll_interval
+
+                if container_started:
+                    self.sig_container_status.emit(ContainerState.RUNNING)
+                    self._append_log(
+                        f"\n=== Servidor Web noVNC listo: http://localhost:{web_port}/vnc.html ===\n"
+                        "Visualizando topics del TurtleBot 4 físico en RViz2.\n"
+                    )
+                    QtCore.QTimer.singleShot(1500, self._open_web_gui)
+                else:
+                    if self.active_sim_thread and self.active_sim_thread.isRunning():
+                        self.sig_container_status.emit(ContainerState.RUNNING)
+                        QtCore.QTimer.singleShot(1500, self._open_web_gui)
+                    else:
+                        self.sig_container_status.emit(ContainerState.NOT_RUNNING)
+            except Exception as e:
+                logger.exception("Error al iniciar RViz2 para robot físico: %s", e)
+                self._append_log(f"[Error] No se pudo iniciar el contenedor: {e}\n")
                 self.sig_container_status.emit(ContainerState.NOT_RUNNING)
 
         threading.Thread(target=_worker, daemon=True).start()

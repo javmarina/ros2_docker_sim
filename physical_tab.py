@@ -41,6 +41,7 @@ class PhysicalRobotTab(QtWidgets.QWidget):
     sig_show_info = QtCore.Signal(str, str)
     sig_show_warning = QtCore.Signal(str, str)
     sig_scan_finished = QtCore.Signal(bool, str, bool, str, str)
+    sig_launch_physical_rviz = QtCore.Signal(str, str)
 
     def __init__(
         self,
@@ -195,10 +196,18 @@ class PhysicalRobotTab(QtWidgets.QWidget):
         self.ent_robot_ws.textChanged.connect(self._on_field_changed)
         ssh_grid.addWidget(self.ent_robot_ws, 1, 3)
 
+        lbl_domain = QtWidgets.QLabel("ROS_DOMAIN_ID:")
+        lbl_domain.setProperty("heading_small", True)
+        ssh_grid.addWidget(lbl_domain, 2, 0)
+        self.ent_robot_domain_id = QtWidgets.QLineEdit("0")
+        self.ent_robot_domain_id.setFixedWidth(80)
+        self.ent_robot_domain_id.textChanged.connect(self._on_field_changed)
+        ssh_grid.addWidget(self.ent_robot_domain_id, 2, 1)
+
         ssh_layout.addLayout(ssh_grid)
 
         lbl_ssh_note = QtWidgets.QLabel(
-            "Valores predeterminados para TurtleBot 4: usuario 'ubuntu', contraseña 'turtlebot4', workspace '~/ros2_ws'."
+            "Valores predeterminados para TurtleBot 4: usuario 'ubuntu', contraseña 'turtlebot4', workspace '~/ros2_ws', DOMAIN_ID '0'."
         )
         lbl_ssh_note.setProperty("note", True)
         ssh_layout.addWidget(lbl_ssh_note)
@@ -238,7 +247,15 @@ class PhysicalRobotTab(QtWidgets.QWidget):
         self.btn_robot_terminal.setIconSize(QtCore.QSize(16, 16))
         self.btn_robot_terminal.setObjectName("btnRobotTerminal")
         self.btn_robot_terminal.clicked.connect(self.on_open_terminal)
-        btn_grid.addWidget(self.btn_robot_terminal, 1, 0, 1, 2)
+        btn_grid.addWidget(self.btn_robot_terminal, 1, 0)
+
+        self.btn_robot_rviz = QtWidgets.QPushButton(
+            "Abrir RViz2 para robot físico (noVNC)"
+        )
+        self.btn_robot_rviz.setIconSize(QtCore.QSize(16, 16))
+        self.btn_robot_rviz.setObjectName("btnRobotRviz")
+        self.btn_robot_rviz.clicked.connect(self.on_launch_rviz)
+        btn_grid.addWidget(self.btn_robot_rviz, 1, 1)
 
         ops_layout.addLayout(btn_grid)
         self._update_action_buttons()
@@ -246,7 +263,8 @@ class PhysicalRobotTab(QtWidgets.QWidget):
         lbl_ops_info = QtWidgets.QLabel(
             "• 'Enviar código (SCP)': Sincroniza la carpeta 'src' del workspace local con el workspace remoto en el TurtleBot 4.\n"
             "• 'Compilar en el robot': Ejecuta 'colcon build --symlink-install' en el robot; la salida se muestra en directo en la pestaña 'Salida y logs'.\n"
-            "• 'Abrir terminal en el robot': Lanza una sesión interactiva SSH en una ventana de consola independiente."
+            "• 'Abrir terminal en el robot': Lanza una sesión interactiva SSH en una ventana de consola independiente.\n"
+            "• 'Abrir RViz2 para robot físico (noVNC)': Inicia RViz2 en el contenedor Docker conectado por DDS unicast a los topics del robot y abre la visualización en el navegador."
         )
         lbl_ops_info.setProperty("secondary", True)
         ops_layout.addWidget(lbl_ops_info)
@@ -276,6 +294,10 @@ class PhysicalRobotTab(QtWidgets.QWidget):
             self.ent_robot_ws.setText(
                 str(self.config_store.get("robot_remote_ws", "~/ros2_ws"))
             )
+            saved_domain = self.config_store.get(
+                "robot_domain_id", self.config_store.get("ros_domain_id", "0")
+            )
+            self.ent_robot_domain_id.setText(str(saved_domain))
         finally:
             self._is_loading = False
             self._on_ip_changed()
@@ -289,6 +311,9 @@ class PhysicalRobotTab(QtWidgets.QWidget):
         self.config_store.set("robot_password", self.ent_robot_password.text().strip())
         self.config_store.set("robot_port", self.ent_robot_port.text().strip())
         self.config_store.set("robot_remote_ws", self.ent_robot_ws.text().strip())
+        self.config_store.set(
+            "robot_domain_id", self.ent_robot_domain_id.text().strip() or "0"
+        )
 
     def _on_field_changed(self):
         self.save_preferences()
@@ -306,6 +331,7 @@ class PhysicalRobotTab(QtWidgets.QWidget):
         self.btn_robot_scp.setEnabled(enabled)
         self.btn_robot_compile.setEnabled(enabled)
         self.btn_robot_terminal.setEnabled(enabled)
+        self.btn_robot_rviz.setEnabled(enabled)
 
         if not enabled:
             tip = "Robot no detectado en la red Wi-Fi. Conéctate a la red del robot y pulsa 'Buscar / Escanear robot'."
@@ -321,6 +347,10 @@ class PhysicalRobotTab(QtWidgets.QWidget):
         )
         self.btn_robot_terminal.setToolTip(
             tip or "Abrir terminal interactiva SSH en el TurtleBot 4"
+        )
+        self.btn_robot_rviz.setToolTip(
+            tip
+            or "Abrir RViz2 en el navegador (noVNC) conectado por DDS al TurtleBot 4"
         )
 
     def start_robot_scan(self, deep_sweep: bool = True):
@@ -455,6 +485,13 @@ class PhysicalRobotTab(QtWidgets.QWidget):
         self.btn_robot_terminal.setIcon(
             get_themed_icon(
                 "utilities-terminal",
+                color=col,
+                fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_DesktopIcon,
+            )
+        )
+        self.btn_robot_rviz.setIcon(
+            get_themed_icon(
+                "applications-internet",
                 color=col,
                 fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_DesktopIcon,
             )
@@ -677,3 +714,16 @@ class PhysicalRobotTab(QtWidgets.QWidget):
             self.sig_log_message.emit(f"\n[Terminal SSH] {msg}\n")
         else:
             self.sig_show_warning.emit("Terminal SSH", msg)
+
+    def on_launch_rviz(self):
+        """Launches RViz2 in Docker connected to the physical robot via DDS peer unicast."""
+        robot_ip = self.ent_robot_ip.text().strip()
+        if not robot_ip:
+            self.sig_show_warning.emit(
+                "TurtleBot 4",
+                "Por favor introduce o escanea la dirección IP del TurtleBot 4 antes de abrir RViz2.",
+            )
+            return
+
+        domain_id = self.ent_robot_domain_id.text().strip() or "0"
+        self.sig_launch_physical_rviz.emit(robot_ip, domain_id)

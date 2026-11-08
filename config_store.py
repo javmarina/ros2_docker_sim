@@ -37,6 +37,7 @@ class ConfigStore:
         "robot_password": "turtlebot4",
         "robot_port": "22",
         "robot_remote_ws": "~/turtlebot4_ws",
+        "robot_domain_id": "0",
     }
 
     # Enum-backed settings: key -> (enum class, safe fallback member)
@@ -46,7 +47,12 @@ class ConfigStore:
         "scenario_id": (ScenarioId, ScenarioId.CONTAINER_ONLY),
     }
 
-    def __init__(self, fallback_dir: Path | None = None):
+    def __init__(
+        self,
+        fallback_dir: Path | None = None,
+        config_dir: Path | None = None,
+    ):
+        self._config_dir = config_dir
         self._fallback_dir = fallback_dir or Path(__file__).parent.resolve()
         self._config_path = self._resolve_config_path()
         self._data: dict[str, Any] = {}
@@ -54,6 +60,10 @@ class ConfigStore:
 
     def _resolve_config_path(self) -> Path:
         """Determina la ruta óptima para el archivo de configuración según el sistema operativo."""
+        if self._config_dir is not None:
+            self._config_dir.mkdir(parents=True, exist_ok=True)
+            return self._config_dir / self.CONFIG_FILE_NAME
+
         system = platform.system().lower()
         try:
             if "windows" in system:

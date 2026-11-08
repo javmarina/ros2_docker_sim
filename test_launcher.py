@@ -150,20 +150,26 @@ def test_exception_report_builder():
 def test_physical_tab_widget():
     """Validates PhysicalRobotTab construction, fields, and preference storage."""
     with tempfile.TemporaryDirectory() as tmp_dir:
-        config = ConfigStore(fallback_dir=Path(tmp_dir))
+        config = ConfigStore(config_dir=Path(tmp_dir))
         config.set("robot_ip", "192.168.1.55")
+        config.set("robot_domain_id", "0")
 
         tab = PhysicalRobotTab(config, lambda: "/fake/ws")
         tab.load_preferences()
 
         assert tab.ent_robot_ip.text() == "192.168.1.55"
         assert tab.ent_robot_user.text() == "ubuntu"
+        assert tab.ent_robot_domain_id.text() == "0"
         assert not tab.btn_robot_scp.isEnabled()
+        assert not tab.btn_robot_rviz.isEnabled()
+        assert tab.btn_robot_rviz.objectName() == "btnRobotRviz"
 
-        # Update IP and verify save
+        # Update IP and domain and verify save
         tab.ent_robot_ip.setText("192.168.1.99")
+        tab.ent_robot_domain_id.setText("42")
         tab.save_preferences()
         assert config.get("robot_ip") == "192.168.1.99"
+        assert config.get("robot_domain_id") == "42"
 
 
 def test_main_window_integration():
@@ -180,6 +186,8 @@ def test_main_window_integration():
         # Verify backwards-compatibility attribute aliases
         assert win.ent_robot_ip is win.physical_tab.ent_robot_ip
         assert win.btn_robot_terminal is win.physical_tab.btn_robot_terminal
+        assert win.btn_robot_rviz is win.physical_tab.btn_robot_rviz
+        assert win.ent_robot_domain_id is win.physical_tab.ent_robot_domain_id
         assert win.lbl_wifi_badge is win.physical_tab.lbl_wifi_badge
 
         # Verify scenario selection and world populating
@@ -411,7 +419,7 @@ def test_config_store_world_fallback():
         config_file.write_text(
             json.dumps({"world_name": "warehouse"}), encoding="utf-8"
         )
-        store = ConfigStore(fallback_dir=Path(tmp_dir))
+        store = ConfigStore(config_dir=Path(tmp_dir))
         store._config_path = config_file
         store.load()
         assert store.get("world_name") == SimulationWorld.EMPTY.value
@@ -640,6 +648,73 @@ def test_dialog_and_message_box_dark_mode():
         QtWidgets.QApplication.processEvents()
 
 
+def test_physical_robot_rviz_launch_configuration():
+    """
+    Validates physical robot RViz2 launcher integration:
+    - Docker run arguments include CycloneDDS unicast peer configuration.
+    - ROS_DOMAIN_ID is properly propagated to the container environment.
+    - Physical tab button triggers launch signal with correct IP and Domain ID.
+    - Empty IP triggers warning without launching container.
+    """
+    from docker_service import DockerService
+
+    # 1. Test build_docker_run_args with peer_ip and custom domain_id
+    args = DockerService.build_docker_run_args(
+        image_name="ros2-humble-nav-course:latest",
+        container_name="test_physical_rviz",
+        ros_cmd="ros2 launch turtlebot4_viz view_robot.launch.py",
+        domain_id="15",
+        robot_model="turtlebot4",
+        ws_path="C:/dummy/ws",
+        web_port="6080",
+        peer_ip="192.168.1.142",
+    )
+
+    args_str = " ".join(args)
+    assert "-e ROS_DOMAIN_ID=15" in args_str
+    assert "-e CYCLONEDDS_URI=file:///etc/cyclonedds.xml" in args_str
+    assert "-e FASTRTPS_DEFAULT_PROFILES_FILE" not in args_str
+    assert "Peer address=\\\"192.168.1.142\\\"" in args_str or 'Peer address="192.168.1.142"' in args_str
+    assert "turtlebot4_viz view_robot.launch.py" in args_str
+
+    # 2. Test PhysicalRobotTab on_launch_rviz signal routing
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        config = ConfigStore(config_dir=Path(tmp_dir))
+        tab = PhysicalRobotTab(config, lambda: "/test/ws")
+
+        received_signal = []
+        tab.sig_launch_physical_rviz.connect(lambda ip, dom: received_signal.append((ip, dom)))
+        warning_shown = []
+        tab.sig_show_warning.connect(lambda title, msg: warning_shown.append((title, msg)))
+
+        # Empty IP -> warning shown, no launch
+        tab.ent_robot_ip.setText("")
+        tab.on_launch_rviz()
+        assert len(warning_shown) == 1
+        assert len(received_signal) == 0
+
+        # Valid IP & Domain ID -> signal emitted
+        tab.ent_robot_ip.setText("192.168.1.142")
+        tab.ent_robot_domain_id.setText("15")
+        tab.on_launch_rviz()
+        assert len(received_signal) == 1
+        assert received_signal[0] == ("192.168.1.142", "15")
+
+    # 3. Test ModernSimulationLauncher physical RViz method validation
+    win = ModernSimulationLauncher(enable_background_tasks=False)
+    try:
+        warnings = []
+        win._show_warning_box = lambda title, msg: warnings.append((title, msg))
+        # If IP is empty, launch_physical_robot_rviz aborts cleanly
+        win.physical_tab.ent_robot_ip.setText("")
+        win.launch_physical_robot_rviz()
+        assert len(warnings) == 1
+        assert win.container_state.is_not_running
+    finally:
+        win.close()
+        QtWidgets.QApplication.processEvents()
+
+
 if __name__ == "__main__":
     print("Running tests...")
     test_theme_palettes_and_stylesheet()
@@ -674,4 +749,6 @@ if __name__ == "__main__":
     print("[OK] test_docker_command_length_windows_limits passed")
     test_dialog_and_message_box_dark_mode()
     print("[OK] test_dialog_and_message_box_dark_mode passed")
-    print("\nAll 16 test suites passed successfully!")
+    test_physical_robot_rviz_launch_configuration()
+    print("[OK] test_physical_robot_rviz_launch_configuration passed")
+    print("\nAll 17 test suites passed successfully!")
