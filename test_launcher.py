@@ -5,8 +5,10 @@ or directly: `python test_launcher.py`
 """
 
 import json
+import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -161,6 +163,10 @@ def test_physical_tab_widget():
         assert tab.ent_robot_user.text() == "ubuntu"
         assert tab.ent_robot_domain_id.text() == "0"
         assert not tab.btn_robot_scp.isEnabled()
+        assert tab.btn_robot_sync is tab.btn_robot_scp
+        assert not tab.btn_robot_remove.isEnabled()
+        assert tab.btn_robot_remove.text() == "Borrar código del robot"
+        assert tab.btn_robot_remove.objectName() == "btnRobotRemove"
         assert not tab.btn_robot_rviz.isEnabled()
         assert tab.btn_robot_rviz.objectName() == "btnRobotRviz"
 
@@ -185,8 +191,10 @@ def test_main_window_integration():
 
         # Verify backwards-compatibility attribute aliases
         assert win.ent_robot_ip is win.physical_tab.ent_robot_ip
+        assert win.btn_robot_sync is win.physical_tab.btn_robot_sync
         assert win.btn_robot_terminal is win.physical_tab.btn_robot_terminal
         assert win.btn_robot_rviz is win.physical_tab.btn_robot_rviz
+        assert win.btn_robot_remove is win.physical_tab.btn_robot_remove
         assert win.ent_robot_domain_id is win.physical_tab.ent_robot_domain_id
         assert win.lbl_wifi_badge is win.physical_tab.lbl_wifi_badge
 
@@ -710,9 +718,329 @@ def test_physical_robot_rviz_launch_configuration():
         win.launch_physical_robot_rviz()
         assert len(warnings) == 1
         assert win.container_state.is_not_running
+
+        # Test physical_tab update_container_state reflection
+        win.physical_tab.ent_robot_ip.setText("192.168.1.142")
+        win.physical_tab._robot_detected = True
+        win.physical_tab.update_container_state(is_running=True, is_physical_rviz=True)
+        assert "noVNC" in win.physical_tab.btn_robot_rviz.text()
+        win.physical_tab.update_container_state(is_running=False, is_physical_rviz=False)
+        assert "Abrir RViz2" in win.physical_tab.btn_robot_rviz.text()
     finally:
         win.close()
         QtWidgets.QApplication.processEvents()
+
+
+def test_sftp_incremental_sync():
+    """Validates SyncStats behavior, incremental upload skipping, mtime preservation, and deletion."""
+    from utils import SyncStats, sftp_upload_dir
+
+    # 1. Test SyncStats properties and integer backwards-compatibility
+    stats = SyncStats(uploaded=3, skipped=5, deleted=1)
+    assert int(stats) == 3
+    assert stats == 3
+    assert stats.uploaded == 3
+    assert stats.skipped == 5
+    assert stats.deleted == 1
+    assert stats.total_processed == 8
+
+    # 2. Mock SFTP client to test incremental synchronization
+    class MockSFTPAttr:
+        def __init__(self, filename, size, mtime, is_dir=False):
+            self.filename = filename
+            self.st_size = size
+            self.st_mtime = mtime
+            self.st_mode = 0o040755 if is_dir else 0o100644
+
+    class MockSFTPClient:
+        def __init__(self):
+            self.remote_fs = {}  # path -> (size, mtime, is_dir)
+            self.uploaded_files = []
+            self.removed_files = []
+            self.utime_calls = []
+
+        def stat(self, path):
+            p = path.replace("\\", "/").rstrip("/")
+            if p in self.remote_fs:
+                s, m, is_dir = self.remote_fs[p]
+                return MockSFTPAttr(p.split("/")[-1], s, m, is_dir)
+            raise OSError("No such file or directory")
+
+        def mkdir(self, path):
+            p = path.replace("\\", "/").rstrip("/")
+            self.remote_fs[p] = (0, 0, True)
+
+        def listdir_attr(self, path):
+            p = path.replace("\\", "/").rstrip("/")
+            results = []
+            prefix = p if p == "/" else p + "/"
+            for k, (s, m, is_dir) in self.remote_fs.items():
+                if k.startswith(prefix):
+                    rel = k[len(prefix):]
+                    if "/" not in rel and rel:
+                        results.append(MockSFTPAttr(rel, s, m, is_dir))
+            return results
+
+        def put(self, src, dest):
+            p = dest.replace("\\", "/").rstrip("/")
+            sz = os.path.getsize(src)
+            mt = int(os.path.getmtime(src))
+            self.remote_fs[p] = (sz, mt, False)
+            self.uploaded_files.append((src, p))
+
+        def utime(self, path, times):
+            p = path.replace("\\", "/").rstrip("/")
+            if p in self.remote_fs:
+                sz, _, is_dir = self.remote_fs[p]
+                self.remote_fs[p] = (sz, times[1], is_dir)
+            self.utime_calls.append((p, times))
+
+        def remove(self, path):
+            p = path.replace("\\", "/").rstrip("/")
+            self.remote_fs.pop(p, None)
+            self.removed_files.append(p)
+
+        def rmdir(self, path):
+            p = path.replace("\\", "/").rstrip("/")
+            self.remote_fs.pop(p, None)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        src = Path(tmp_dir) / "src"
+        src.mkdir()
+        file1 = src / "node.py"
+        file1.write_text("print('hello')", encoding="utf-8")
+        file2 = src / "params.yaml"
+        file2.write_text("param: 42", encoding="utf-8")
+
+        mock_sftp = MockSFTPClient()
+
+        # Initial sync: both files should be uploaded
+        res1 = sftp_upload_dir(mock_sftp, src, "/home/ubuntu/ws/src")
+        assert res1.uploaded == 2
+        assert res1.skipped == 0
+        assert len(mock_sftp.uploaded_files) == 2
+
+        # Second sync: neither file changed, so both must be skipped
+        mock_sftp.uploaded_files.clear()
+        res2 = sftp_upload_dir(mock_sftp, src, "/home/ubuntu/ws/src")
+        assert res2.uploaded == 0
+        assert res2.skipped == 2
+        assert len(mock_sftp.uploaded_files) == 0
+
+        # Modify one file: only the modified file should be uploaded
+        time.sleep(1.1)
+        file1.write_text("print('hello modified')", encoding="utf-8")
+        mock_sftp.uploaded_files.clear()
+        res3 = sftp_upload_dir(mock_sftp, src, "/home/ubuntu/ws/src")
+        assert res3.uploaded == 1
+        assert res3.skipped == 1
+        assert len(mock_sftp.uploaded_files) == 1
+        assert "node.py" in mock_sftp.uploaded_files[0][0]
+
+        # Add a remote file not in local directory, test delete_stale=True
+        mock_sftp.remote_fs["/home/ubuntu/ws/src/obsolete.py"] = (10, 100, False)
+        res4 = sftp_upload_dir(mock_sftp, src, "/home/ubuntu/ws/src", delete_stale=True)
+        assert res4.deleted == 1
+        assert "/home/ubuntu/ws/src/obsolete.py" in mock_sftp.removed_files
+
+
+def test_remove_robot_packages_logic():
+    """Validates get_local_package_names scanning and PhysicalRobotTab on_remove_robot_files guards."""
+    from utils import get_local_package_names
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        root = Path(tmp_dir)
+
+        # 1. Workspace with src/ containing packages
+        ws_src = root / "src"
+        ws_src.mkdir()
+        (ws_src / "nav_package").mkdir()
+        (ws_src / "nav_package" / "package.xml").write_text(
+            "<package><name>nav_package</name></package>", encoding="utf-8"
+        )
+        (ws_src / "vision_package").mkdir()
+        (ws_src / "vision_package" / "package.xml").write_text(
+            "<package><name>vision_package</name></package>", encoding="utf-8"
+        )
+
+        # Fake build and install folders that shouldn't be picked up as package names
+        (root / "build").mkdir()
+        (root / "build" / "fake_build_pkg").mkdir()
+        (root / "build" / "fake_build_pkg" / "package.xml").write_text(
+            "<package></package>", encoding="utf-8"
+        )
+
+        pkgs = get_local_package_names(root)
+        assert "nav_package" in pkgs
+        assert "vision_package" in pkgs
+        assert "fake_build_pkg" not in pkgs
+        assert "build" not in pkgs
+
+        # 2. Test empty or non-existent path
+        assert get_local_package_names("") == set()
+        assert get_local_package_names(None) == set()
+        assert get_local_package_names(root / "non_existent") == set()
+
+        # 3. Test PhysicalRobotTab on_remove_robot_files guards
+        config = ConfigStore(config_dir=root / "config")
+        tab = PhysicalRobotTab(config, lambda: str(root))
+
+        warnings = []
+        tab.sig_show_warning.connect(lambda t, m: warnings.append((t, m)))
+
+        # Empty IP -> warning
+        tab.ent_robot_ip.setText("")
+        tab.on_remove_robot_files(confirm=False)
+        assert len(warnings) == 1
+        assert "IP" in warnings[0][1]
+
+        # Valid IP but empty workspace path -> warning
+        tab_empty_ws = PhysicalRobotTab(config, lambda: "")
+        warnings.clear()
+        tab_empty_ws.sig_show_warning.connect(lambda t, m: warnings.append((t, m)))
+        tab_empty_ws.ent_robot_ip.setText("192.168.1.142")
+        tab_empty_ws.on_remove_robot_files(confirm=False)
+        assert len(warnings) == 1
+        assert "workspace" in warnings[0][1]
+
+
+def test_image_missing_prompt_cross_thread_dispatch(monkeypatch):
+    """
+    Validates that when the course image is missing, the preparation prompt
+    is dispatched safely to the main Qt GUI thread using run_on_main_thread,
+    preventing launcher hangs caused by QTimer.singleShot from worker threads.
+    """
+    import threading
+    from docker_service import DockerService
+
+    win = ModernSimulationLauncher(enable_background_tasks=False)
+    try:
+        # Verify run_on_main_thread directly from background thread
+        results = []
+        def _bg_worker():
+            win.run_on_main_thread(lambda: results.append(("direct", threading.current_thread().name)))
+            win.run_on_main_thread(lambda: results.append(("delayed", threading.current_thread().name)), delay_ms=20)
+
+        t = threading.Thread(target=_bg_worker)
+        t.start()
+        t.join()
+
+        # Process Qt events to flush queued slot and timer
+        for _ in range(10):
+            QtWidgets.QApplication.processEvents()
+            time.sleep(0.01)
+
+        assert len(results) == 2
+        assert results[0][0] == "direct"
+        assert results[1][0] == "delayed"
+
+        # Verify _on_launch_simulation with missing image triggers _prompt_initial_image_build
+        monkeypatch.setattr(DockerService, "check_docker_running", lambda timeout=4.0: (True, ""))
+        monkeypatch.setattr(DockerService, "is_image_available", lambda image_name=None, timeout=5.0: False)
+
+        prompt_called = []
+        monkeypatch.setattr(win, "_prompt_initial_image_build", lambda on_continue_callback=None: prompt_called.append(True))
+
+        win._on_launch_simulation()
+
+        # Wait for worker thread to execute and queue prompt
+        for _ in range(20):
+            QtWidgets.QApplication.processEvents()
+            if prompt_called:
+                break
+            time.sleep(0.02)
+
+        assert len(prompt_called) == 1
+
+        # Verify launch_physical_robot_rviz with missing image also triggers _prompt_initial_image_build
+        prompt_called_rviz = []
+        monkeypatch.setattr(
+            win,
+            "_prompt_initial_image_build",
+            lambda on_continue_callback=None: prompt_called_rviz.append(on_continue_callback),
+        )
+
+        win.launch_physical_robot_rviz(robot_ip="192.168.1.142", domain_id="0")
+
+        for _ in range(20):
+            QtWidgets.QApplication.processEvents()
+            if prompt_called_rviz:
+                break
+            time.sleep(0.02)
+
+        assert len(prompt_called_rviz) == 1
+        assert callable(prompt_called_rviz[0])
+    finally:
+        win.close()
+        QtWidgets.QApplication.processEvents()
+
+
+def test_workspace_packages_filtering_and_loose_files():
+    """
+    Validates that:
+    1. Only folders containing package.xml directly below workspace (or in src/) are discovered.
+    2. Loose files like .pdf, .zip, .txt are completely excluded.
+    3. Non-package folders without package.xml are completely excluded.
+    4. PhysicalRobotTab.on_send_code alerts and aborts if no valid packages exist.
+    """
+    from utils import find_workspace_packages
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        ws = Path(tmp_dir)
+
+        # Loose files in workspace
+        (ws / "guide.pdf").write_bytes(b"%PDF-1.4 dummy")
+        (ws / "archive.zip").write_bytes(b"PK\x03\x04 dummy")
+        (ws / "readme.txt").write_text("notes", encoding="utf-8")
+
+        # Non-package folder
+        (ws / "notes_folder").mkdir()
+        (ws / "notes_folder" / "document.pdf").write_bytes(b"%PDF")
+
+        # Valid package folders
+        pkg1 = ws / "pkg_navegacion_p1"
+        pkg1.mkdir()
+        (pkg1 / "package.xml").write_text(
+            "<package><name>pkg_navegacion_p1</name></package>", encoding="utf-8"
+        )
+        (pkg1 / "setup.py").write_text("# setup", encoding="utf-8")
+        # Package internal asset/pdf should not prevent package from qualifying
+        (pkg1 / "resource.pdf").write_bytes(b"%PDF")
+
+        pkg2 = ws / "pkg_navegacion_p2"
+        pkg2.mkdir()
+        (pkg2 / "package.xml").write_text(
+            "<package><name>pkg_navegacion_p2</name></package>", encoding="utf-8"
+        )
+
+        pkgs = find_workspace_packages(ws)
+        pkg_names = [name for name, _ in pkgs]
+        assert pkg_names == ["pkg_navegacion_p1", "pkg_navegacion_p2"]
+        assert "guide.pdf" not in pkg_names
+        assert "archive.zip" not in pkg_names
+        assert "notes_folder" not in pkg_names
+
+        # Test single package directory
+        single_pkgs = find_workspace_packages(pkg1)
+        assert len(single_pkgs) == 1
+        assert single_pkgs[0][0] == "pkg_navegacion_p1"
+
+        # Test PhysicalRobotTab on_send_code when workspace has NO packages (only loose files)
+        with tempfile.TemporaryDirectory() as empty_pkg_dir:
+            empty_ws = Path(empty_pkg_dir)
+            (empty_ws / "only_pdf.pdf").write_bytes(b"%PDF")
+            (empty_ws / "random_folder").mkdir()
+
+            config = ConfigStore(config_dir=empty_ws / "config")
+            tab = PhysicalRobotTab(config, lambda: str(empty_ws))
+            tab.ent_robot_ip.setText("192.168.1.142")
+
+            warnings = []
+            tab.sig_show_warning.connect(lambda t, m: warnings.append((t, m)))
+            tab.on_send_code()
+
+            assert len(warnings) == 1
+            assert "package.xml" in warnings[0][1]
 
 
 if __name__ == "__main__":
@@ -751,4 +1079,12 @@ if __name__ == "__main__":
     print("[OK] test_dialog_and_message_box_dark_mode passed")
     test_physical_robot_rviz_launch_configuration()
     print("[OK] test_physical_robot_rviz_launch_configuration passed")
-    print("\nAll 17 test suites passed successfully!")
+    test_sftp_incremental_sync()
+    print("[OK] test_sftp_incremental_sync passed")
+    test_remove_robot_packages_logic()
+    print("[OK] test_remove_robot_packages_logic passed")
+    test_workspace_packages_filtering_and_loose_files()
+    print("[OK] test_workspace_packages_filtering_and_loose_files passed")
+    test_image_missing_prompt_cross_thread_dispatch(pytest.MonkeyPatch())
+    print("[OK] test_image_missing_prompt_cross_thread_dispatch passed")
+    print("\nAll 21 test suites passed successfully!")

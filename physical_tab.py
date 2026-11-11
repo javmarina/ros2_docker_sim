@@ -6,6 +6,7 @@ SFTP code synchronization, remote compilation (colcon build), and SSH terminal l
 
 import logging
 import os
+import stat
 import threading
 import time
 from collections.abc import Callable
@@ -17,10 +18,13 @@ from config_store import ConfigStore
 from embedded_icon import get_themed_icon
 from theme import THEME_PALETTES, style_badge
 from utils import (
+    _SFTP_IGNORE_DIRS,
     DEFAULT_TURTLEBOT4_MAC,
+    find_workspace_packages,
     get_connected_ssid,
     get_ip_from_mac,
     get_local_ip,
+    get_local_package_names,
     open_robot_ssh_terminal,
     ping_device,
     sftp_upload_dir,
@@ -60,6 +64,8 @@ class PhysicalRobotTab(QtWidgets.QWidget):
         self._last_scan_data = None
         self._has_checked_once = False
         self._is_loading = False
+        self._container_running = False
+        self._is_physical_rviz = False
 
         self._build_ui()
         self.sig_scan_finished.connect(self._on_scan_finished)
@@ -229,9 +235,10 @@ class PhysicalRobotTab(QtWidgets.QWidget):
         btn_grid = QtWidgets.QGridLayout()
         btn_grid.setSpacing(10)
 
-        self.btn_robot_scp = QtWidgets.QPushButton("Enviar código al robot (SCP)")
+        self.btn_robot_scp = QtWidgets.QPushButton("Sincronizar código con robot")
         self.btn_robot_scp.setIconSize(QtCore.QSize(16, 16))
         self.btn_robot_scp.clicked.connect(self.on_send_code)
+        self.btn_robot_sync = self.btn_robot_scp
         btn_grid.addWidget(self.btn_robot_scp, 0, 0)
 
         self.btn_robot_compile = QtWidgets.QPushButton(
@@ -257,14 +264,21 @@ class PhysicalRobotTab(QtWidgets.QWidget):
         self.btn_robot_rviz.clicked.connect(self.on_launch_rviz)
         btn_grid.addWidget(self.btn_robot_rviz, 1, 1)
 
+        self.btn_robot_remove = QtWidgets.QPushButton("Borrar código del robot")
+        self.btn_robot_remove.setIconSize(QtCore.QSize(16, 16))
+        self.btn_robot_remove.setObjectName("btnRobotRemove")
+        self.btn_robot_remove.clicked.connect(self.on_remove_robot_files)
+        btn_grid.addWidget(self.btn_robot_remove, 2, 0, 1, 2)
+
         ops_layout.addLayout(btn_grid)
         self._update_action_buttons()
 
         lbl_ops_info = QtWidgets.QLabel(
-            "• 'Enviar código (SCP)': Sincroniza la carpeta 'src' del workspace local con el workspace remoto en el TurtleBot 4.\n"
+            "• 'Sincronizar código': Sincronización incremental (estilo rsync) de la carpeta 'src' local con el workspace remoto en el TurtleBot 4.\n"
             "• 'Compilar en el robot': Ejecuta 'colcon build --symlink-install' en el robot; la salida se muestra en directo en la pestaña 'Salida y logs'.\n"
             "• 'Abrir terminal en el robot': Lanza una sesión interactiva SSH en una ventana de consola independiente.\n"
-            "• 'Abrir RViz2 para robot físico (noVNC)': Inicia RViz2 en el contenedor Docker conectado por DDS unicast a los topics del robot y abre la visualización en el navegador."
+            "• 'Abrir RViz2 para robot físico (noVNC)': Inicia RViz2 en el contenedor Docker conectado por DDS unicast a los topics del robot y abre la visualización en el navegador.\n"
+            "• 'Borrar código del robot': Elimina del workspace del robot los paquetes presentes en tu máquina local."
         )
         lbl_ops_info.setProperty("secondary", True)
         ops_layout.addWidget(lbl_ops_info)
@@ -324,6 +338,14 @@ class PhysicalRobotTab(QtWidgets.QWidget):
         self._robot_detected = bool(current_ip and current_ip == self._last_detected_ip)
         self._update_action_buttons()
 
+    def update_container_state(
+        self, is_running: bool, is_physical_rviz: bool = False
+    ):
+        """Updates UI elements based on current container status."""
+        self._container_running = is_running
+        self._is_physical_rviz = is_physical_rviz
+        self._update_action_buttons()
+
     def _update_action_buttons(self):
         ip = self.ent_robot_ip.text().strip()
         enabled = bool(self._robot_detected and ip)
@@ -332,6 +354,7 @@ class PhysicalRobotTab(QtWidgets.QWidget):
         self.btn_robot_compile.setEnabled(enabled)
         self.btn_robot_terminal.setEnabled(enabled)
         self.btn_robot_rviz.setEnabled(enabled)
+        self.btn_robot_remove.setEnabled(enabled)
 
         if not enabled:
             tip = "Robot no detectado en la red Wi-Fi. Conéctate a la red del robot y pulsa 'Buscar / Escanear robot'."
@@ -339,7 +362,7 @@ class PhysicalRobotTab(QtWidgets.QWidget):
             tip = ""
 
         self.btn_robot_scp.setToolTip(
-            tip or "Enviar código fuente local al TurtleBot 4 (SCP)"
+            tip or "Sincronizar incrementalmente el código fuente con el TurtleBot 4 (SFTP/rsync)"
         )
         self.btn_robot_compile.setToolTip(
             tip
@@ -348,10 +371,22 @@ class PhysicalRobotTab(QtWidgets.QWidget):
         self.btn_robot_terminal.setToolTip(
             tip or "Abrir terminal interactiva SSH en el TurtleBot 4"
         )
-        self.btn_robot_rviz.setToolTip(
+        self.btn_robot_remove.setToolTip(
             tip
-            or "Abrir RViz2 en el navegador (noVNC) conectado por DDS al TurtleBot 4"
+            or "Eliminar del workspace del robot los paquetes presentes en tu máquina local"
         )
+
+        if self._container_running and self._is_physical_rviz:
+            self.btn_robot_rviz.setText("RViz2 en ejecución (noVNC)")
+            self.btn_robot_rviz.setToolTip(
+                "RViz2 conectado al robot físico ya está en ejecución. Pulsa para reabrir la interfaz web."
+            )
+        else:
+            self.btn_robot_rviz.setText("Abrir RViz2 para robot físico (noVNC)")
+            self.btn_robot_rviz.setToolTip(
+                tip
+                or "Abrir RViz2 en el navegador (noVNC) conectado por DDS al TurtleBot 4"
+            )
 
     def start_robot_scan(self, deep_sweep: bool = True):
         """Launches background network detection for the TurtleBot 4."""
@@ -496,13 +531,20 @@ class PhysicalRobotTab(QtWidgets.QWidget):
                 fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_DesktopIcon,
             )
         )
+        self.btn_robot_remove.setIcon(
+            get_themed_icon(
+                "user-trash",
+                color=col,
+                fallback_sp=QtWidgets.QStyle.StandardPixmap.SP_TrashIcon,
+            )
+        )
 
         if self._last_scan_data:
             wifi_ok, ssid, robot_found, robot_ip, msg = self._last_scan_data
             self._update_ui_status(wifi_ok, ssid, robot_found, robot_ip, msg)
 
     def on_send_code(self):
-        """Transfers local workspace source code to the remote robot via SFTP."""
+        """Transfers local workspace source code to the remote robot via incremental SFTP (rsync-like)."""
         robot_ip = self.ent_robot_ip.text().strip()
         if not robot_ip:
             self.sig_show_warning.emit(
@@ -519,14 +561,25 @@ class PhysicalRobotTab(QtWidgets.QWidget):
             )
             return
 
+        package_dirs = find_workspace_packages(ws_path)
+        if not package_dirs:
+            self.sig_show_warning.emit(
+                "TurtleBot 4",
+                "No se encontraron paquetes válidos de ROS 2 (carpetas que contengan 'package.xml') "
+                "en el espacio de trabajo local para transferir.",
+            )
+            return
+
         user = self.ent_robot_user.text().strip() or "ubuntu"
         password = self.ent_robot_password.text().strip() or "turtlebot4"
         port = int(self.ent_robot_port.text().strip() or "22")
         remote_ws = self.ent_robot_ws.text().strip() or "~/ros2_ws"
 
         self.sig_request_tab_switch.emit(1)  # Tab Logs
+        pkg_names_summary = ", ".join(name for name, _ in package_dirs)
         self.sig_log_message.emit(
-            f"\n=== [SCP] Enviando código fuente al TurtleBot 4 ({user}@{robot_ip}:{remote_ws}) ===\n"
+            f"\n=== [Sync] Sincronizando paquetes de ROS 2 con TurtleBot 4 ({user}@{robot_ip}:{remote_ws}) ===\n"
+            f"[Sync] Paquetes detectados ({len(package_dirs)}): {pkg_names_summary}\n"
         )
 
         def _worker():
@@ -534,11 +587,11 @@ class PhysicalRobotTab(QtWidgets.QWidget):
                 import paramiko
             except ImportError:
                 self.sig_log_message.emit(
-                    "\n[Error SCP] La librería 'paramiko' no está instalada en el entorno Python.\n"
+                    "\n[Error Sync] La librería 'paramiko' no está instalada en el entorno Python.\n"
                 )
                 self.sig_show_warning.emit(
                     "Dependencia faltante",
-                    "Se requiere la librería 'paramiko' para transferir archivos vía SCP/SFTP.\nInstálala con: pip install paramiko",
+                    "Se requiere la librería 'paramiko' para transferir archivos vía SFTP.\nInstálala con: pip install paramiko",
                 )
                 return
 
@@ -546,7 +599,7 @@ class PhysicalRobotTab(QtWidgets.QWidget):
                 client = paramiko.SSHClient()
                 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 self.sig_log_message.emit(
-                    f"[SCP] Estableciendo conexión SFTP con {user}@{robot_ip}:{port}...\n"
+                    f"[Sync] Estableciendo conexión SFTP con {user}@{robot_ip}:{port}...\n"
                 )
                 client.connect(
                     robot_ip, port=port, username=user, password=password, timeout=10.0
@@ -558,49 +611,51 @@ class PhysicalRobotTab(QtWidgets.QWidget):
                     r_home = stdout_h.read().decode("utf-8").strip() or f"/home/{user}"
                     target_base = r_home + target_base[1:]
 
-                local_p = Path(ws_path).resolve()
-                if (local_p / "package.xml").is_file():
-                    src_dir = local_p
-                    dest_dir = f"{target_base.rstrip('/')}/src/{local_p.name}"
-                elif (local_p / "src").is_dir():
-                    src_dir = local_p / "src"
-                    dest_dir = f"{target_base.rstrip('/')}/src"
-                else:
-                    src_dir = local_p
-                    dest_dir = f"{target_base.rstrip('/')}/src"
-
-                self.sig_log_message.emit(f"[SCP] Directorio origen local: {src_dir}\n")
-                self.sig_log_message.emit(
-                    f"[SCP] Directorio destino remoto: {dest_dir}\n"
-                )
-
+                remote_src_base = f"{target_base.rstrip('/')}/src"
                 sftp = client.open_sftp()
                 t0 = time.time()
-                file_count = sftp_upload_dir(
-                    sftp,
-                    src_dir,
-                    dest_dir,
-                    log_cb=lambda msg: self.sig_log_message.emit(msg),
-                )
-                elapsed = time.time() - t0
+                total_uploaded = 0
+                total_skipped = 0
 
+                for pkg_name, pkg_path in package_dirs:
+                    dest_pkg_dir = f"{remote_src_base}/{pkg_name}"
+                    self.sig_log_message.emit(
+                        f"[Sync] Paquete '{pkg_name}' ({pkg_path} -> {dest_pkg_dir})\n"
+                    )
+                    stats = sftp_upload_dir(
+                        sftp,
+                        pkg_path,
+                        dest_pkg_dir,
+                        log_cb=lambda msg: self.sig_log_message.emit(msg),
+                    )
+                    total_uploaded += getattr(stats, "uploaded", int(stats))
+                    total_skipped += getattr(stats, "skipped", 0)
+
+                elapsed = time.time() - t0
                 sftp.close()
                 client.close()
 
                 self.sig_log_message.emit(
-                    f"\n[SCP] Transferencia completada con éxito: {file_count} archivos transferidos en {elapsed:.1f}s.\n"
+                    f"\n[Sync] Sincronización completada con éxito en {elapsed:.1f}s: "
+                    f"{total_uploaded} archivos transferidos, {total_skipped} sin cambios "
+                    f"en {len(package_dirs)} paquete(s).\n"
                 )
                 self.sig_show_info.emit(
-                    "Transferencia SCP",
-                    f"Se han transferido con éxito {file_count} archivos al robot en {elapsed:.1f} segundos.",
+                    "Sincronización de código",
+                    f"Sincronización completada con éxito en {elapsed:.1f} segundos.\n\n"
+                    f"Paquetes transferidos ({len(package_dirs)}):\n"
+                    + "\n".join(f"  • {name}" for name, _ in package_dirs)
+                    + f"\n\n• {total_uploaded} archivos subidos o actualizados\n"
+                    + f"• {total_skipped} archivos ya sincronizados (omitidos)",
                 )
             except Exception as e:
-                logger.exception("Error al transferir archivos vía SCP: %s", e)
+                logger.exception("Error al sincronizar archivos vía SFTP: %s", e)
                 self.sig_log_message.emit(
-                    f"\n[Error SCP] Fallo en la transferencia: {e}\n"
+                    f"\n[Error Sync] Fallo en la sincronización: {e}\n"
                 )
                 self.sig_show_warning.emit(
-                    "Error SCP", f"Error al enviar código al TurtleBot 4:\n\n{e}"
+                    "Error de Sincronización",
+                    f"Error al sincronizar código con el TurtleBot 4:\n\n{e}",
                 )
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -727,3 +782,167 @@ class PhysicalRobotTab(QtWidgets.QWidget):
 
         domain_id = self.ent_robot_domain_id.text().strip() or "0"
         self.sig_launch_physical_rviz.emit(robot_ip, domain_id)
+
+    def on_remove_robot_files(self, confirm: bool = True):
+        """
+        Removes packages from the robot's workspace that are present on the user's host machine.
+        Prevents other student groups sharing the physical robot from copying the code.
+        """
+        robot_ip = self.ent_robot_ip.text().strip()
+        if not robot_ip:
+            self.sig_show_warning.emit(
+                "TurtleBot 4",
+                "Por favor introduce o escanea la dirección IP del TurtleBot 4 antes de continuar.",
+            )
+            return
+
+        ws_path = self.get_workspace_path().strip()
+        if not ws_path or not os.path.exists(ws_path):
+            self.sig_show_warning.emit(
+                "TurtleBot 4",
+                "La carpeta local del espacio de trabajo (workspace) no existe o no es válida.",
+            )
+            return
+
+        local_pkgs = get_local_package_names(ws_path)
+        if not local_pkgs:
+            self.sig_show_warning.emit(
+                "Borrar código del robot",
+                "No se detectaron paquetes ROS 2 en tu espacio de trabajo local para contrastar con el robot.",
+            )
+            return
+
+        user = self.ent_robot_user.text().strip() or "ubuntu"
+        password = self.ent_robot_password.text().strip() or "turtlebot4"
+        port = int(self.ent_robot_port.text().strip() or "22")
+        remote_ws = self.ent_robot_ws.text().strip() or "~/ros2_ws"
+
+        if confirm:
+            pkg_list_str = "\n".join(f"  • {p}" for p in sorted(local_pkgs))
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Borrar código del robot",
+                f"¿Deseas eliminar del TurtleBot 4 los paquetes que coincidan con tu máquina local?\n\n"
+                f"Paquetes locales detectados ({len(local_pkgs)}):\n{pkg_list_str}\n\n"
+                f"Esta acción borrará estos paquetes de '{remote_ws}/src' (así como sus artefactos en build e install).",
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+
+        self.sig_request_tab_switch.emit(1)  # Tab Logs
+        self.sig_log_message.emit(
+            f"\n=== [Cleanup] Buscando y eliminando paquetes locales en TurtleBot 4 ({user}@{robot_ip}:{remote_ws}) ===\n"
+        )
+        self.sig_log_message.emit(
+            f"[Cleanup] Paquetes locales a contrastar: {', '.join(sorted(local_pkgs))}\n"
+        )
+
+        def _worker():
+            try:
+                import paramiko
+            except ImportError:
+                self.sig_log_message.emit(
+                    "\n[Error Cleanup] La librería 'paramiko' no está instalada en el entorno Python.\n"
+                )
+                self.sig_show_warning.emit(
+                    "Dependencia faltante",
+                    "Se requiere la librería 'paramiko' para conectar con el robot.\nInstálala con: pip install paramiko",
+                )
+                return
+
+            try:
+                client = paramiko.SSHClient()
+                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                self.sig_log_message.emit(
+                    f"[Cleanup] Conectando a {user}@{robot_ip}:{port}...\n"
+                )
+                client.connect(
+                    robot_ip, port=port, username=user, password=password, timeout=10.0
+                )
+
+                target_base = remote_ws
+                if target_base.startswith("~"):
+                    _, stdout_h, _ = client.exec_command("echo $HOME")
+                    r_home = stdout_h.read().decode("utf-8").strip() or f"/home/{user}"
+                    target_base = r_home + target_base[1:]
+
+                remote_src = f"{target_base.rstrip('/')}/src"
+
+                sftp = client.open_sftp()
+                remote_packages = set()
+                try:
+                    for attr in sftp.listdir_attr(remote_src):
+                        if (
+                            stat.S_ISDIR(attr.st_mode)
+                            and not attr.filename.startswith(".")
+                            and attr.filename not in _SFTP_IGNORE_DIRS
+                        ):
+                            remote_packages.add(attr.filename)
+                except OSError:
+                    pass
+                finally:
+                    sftp.close()
+
+                # Find which packages on the robot match the user's host machine
+                matching_pkgs = sorted(remote_packages & local_pkgs)
+
+                if not matching_pkgs:
+                    self.sig_log_message.emit(
+                        f"\n[Cleanup] No se encontraron paquetes en {remote_src} que coincidan con tu máquina local.\n"
+                        f"  (Paquetes remotos encontrados: {', '.join(sorted(remote_packages)) if remote_packages else 'ninguno'})\n"
+                    )
+                    client.close()
+                    self.sig_show_info.emit(
+                        "Borrar código del robot",
+                        "No se encontró ningún paquete de tu espacio de trabajo local en el robot.",
+                    )
+                    return
+
+                self.sig_log_message.emit(
+                    f"[Cleanup] Se encontraron {len(matching_pkgs)} paquete(s) coincidentes para eliminar: {', '.join(matching_pkgs)}\n"
+                )
+
+                deleted_pkgs = []
+                for pkg in matching_pkgs:
+                    # Remove from src, build, and install
+                    del_cmd = (
+                        f"rm -rf "
+                        f"'{remote_src}/{pkg}' "
+                        f"'{target_base.rstrip('/')}/build/{pkg}' "
+                        f"'{target_base.rstrip('/')}/install/{pkg}'"
+                    )
+                    _, stdout_d, _ = client.exec_command(del_cmd)
+                    stdout_d.channel.recv_exit_status()
+                    deleted_pkgs.append(pkg)
+                    self.sig_log_message.emit(
+                        f"  -> [Eliminado del robot] {pkg} (src, build, install)\n"
+                    )
+
+                client.close()
+
+                summary = (
+                    f"\n[Cleanup] Operación completada con éxito. Se han eliminado {len(deleted_pkgs)} paquete(s) del TurtleBot 4:\n"
+                    + "\n".join(f"  • {p}" for p in deleted_pkgs)
+                    + "\n"
+                )
+                self.sig_log_message.emit(summary)
+                self.sig_show_info.emit(
+                    "Borrar código del robot",
+                    f"Se han eliminado con éxito {len(deleted_pkgs)} paquete(s) del TurtleBot 4:\n\n"
+                    + "\n".join(f"• {p}" for p in deleted_pkgs)
+                    + "\n\nTu código ya no está accesible para otros grupos de prácticas.",
+                )
+
+            except Exception as e:
+                logger.exception("Error al eliminar archivos del robot: %s", e)
+                self.sig_log_message.emit(
+                    f"\n[Error Cleanup] Fallo al eliminar archivos del robot: {e}\n"
+                )
+                self.sig_show_warning.emit(
+                    "Error de Limpieza",
+                    f"Error al eliminar archivos del TurtleBot 4:\n\n{e}",
+                )
+
+        threading.Thread(target=_worker, daemon=True).start()

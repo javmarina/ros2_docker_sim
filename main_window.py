@@ -73,6 +73,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     sig_container_state_changed = QtCore.Signal(object)
     sig_log_received = QtCore.Signal(str)
     sig_robot_scan_finished = QtCore.Signal(bool, str, bool, str, str)
+    sig_run_on_main = QtCore.Signal(object)
 
     def __init__(self, enable_background_tasks: bool | None = None):
         super().__init__()
@@ -112,6 +113,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
 
         self._container_state: ContainerState = ContainerState.NOT_RUNNING
         self._simulation_ready: bool = False
+        self._is_physical_rviz_mode: bool = False
         self._container_miss_count = 0
         self._is_checking_container: bool = False
         self._container_poll_timer: QtCore.QTimer | None = None
@@ -125,6 +127,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.sig_container_status.connect(self._on_container_status_changed)
         self.sig_container_state_changed.connect(self._on_container_status_changed)
         self.sig_log_received.connect(self._append_log_main_thread)
+        self.sig_run_on_main.connect(self._run_on_main_slot)
 
         saved_theme = self.config_store.get("theme_mode", "")
         if saved_theme in ("dark", "light"):
@@ -650,9 +653,11 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.ent_robot_domain_id = self.physical_tab.ent_robot_domain_id
         self.btn_scan_robot = self.physical_tab.btn_scan_robot
         self.btn_robot_scp = self.physical_tab.btn_robot_scp
+        self.btn_robot_sync = self.physical_tab.btn_robot_sync
         self.btn_robot_compile = self.physical_tab.btn_robot_compile
         self.btn_robot_terminal = self.physical_tab.btn_robot_terminal
         self.btn_robot_rviz = self.physical_tab.btn_robot_rviz
+        self.btn_robot_remove = self.physical_tab.btn_robot_remove
         self.lbl_wifi_badge = self.physical_tab.lbl_wifi_badge
         self.lbl_robot_badge = self.physical_tab.lbl_robot_badge
 
@@ -1358,6 +1363,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     def _update_action_buttons_state(self):
         state = self._container_state
         docker_starting = self._docker_state == DockerState.STARTING
+        is_physical_rviz = getattr(self, "_is_physical_rviz_mode", False)
 
         selected_sc_name = self.cbo_scenario.currentText()
         is_container_only = (
@@ -1387,31 +1393,59 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             )
             self.btn_stop.setToolTip("Docker Desktop se está iniciando...")
         elif state == ContainerState.STARTING:
-            self.btn_launch.setToolTip("Iniciando contenedor o simulación...")
-            self.btn_stop.setToolTip("El contenedor se está iniciando...")
-            self.prog_bar.setRange(0, 0)
-            self.lbl_progress.setText(
-                "Iniciando contenedor..."
-                if is_container_only
-                else "Iniciando simulación..."
-            )
+            if is_physical_rviz:
+                self.btn_launch.setToolTip("Iniciando RViz2 para robot físico...")
+                self.btn_stop.setToolTip("El contenedor de RViz2 se está iniciando...")
+                self.prog_bar.setRange(0, 0)
+                self.lbl_progress.setText("Iniciando RViz2 (Robot físico)...")
+            else:
+                self.btn_launch.setToolTip("Iniciando contenedor o simulación...")
+                self.btn_stop.setToolTip("El contenedor se está iniciando...")
+                self.prog_bar.setRange(0, 0)
+                self.lbl_progress.setText(
+                    "Iniciando contenedor..."
+                    if is_container_only
+                    else "Iniciando simulación..."
+                )
         elif state == ContainerState.STOPPING:
-            self.btn_launch.setToolTip("Deteniendo contenedor...")
-            self.btn_stop.setToolTip("Deteniendo contenedor en ejecución...")
-            self.prog_bar.setRange(0, 0)
-            self.lbl_progress.setText("Deteniendo contenedor...")
+            if is_physical_rviz:
+                self.btn_launch.setToolTip("Deteniendo RViz2...")
+                self.btn_stop.setToolTip("Deteniendo contenedor de RViz2...")
+                self.prog_bar.setRange(0, 0)
+                self.lbl_progress.setText("Deteniendo RViz2...")
+            else:
+                self.btn_launch.setToolTip("Deteniendo contenedor...")
+                self.btn_stop.setToolTip("Deteniendo contenedor en ejecución...")
+                self.prog_bar.setRange(0, 0)
+                self.lbl_progress.setText("Deteniendo contenedor...")
         elif state == ContainerState.RUNNING:
-            self.btn_launch.setToolTip(
-                "La simulación o contenedor ya se encuentra en ejecución."
-            )
-            self.btn_stop.setToolTip(
-                "Detiene y elimina el contenedor Docker en ejecución."
-            )
-            if is_container_only:
+            if is_physical_rviz:
+                self.btn_launch.setToolTip(
+                    "RViz2 para robot físico ya se encuentra en ejecución."
+                )
+                self.btn_stop.setToolTip(
+                    "Detiene y cierra el contenedor RViz2 en ejecución."
+                )
+                self.prog_bar.setRange(0, 100)
+                self.prog_bar.setValue(100)
+                self.lbl_progress.setText("RViz2 en ejecución (Robot físico)")
+            elif is_container_only:
+                self.btn_launch.setToolTip(
+                    "La simulación o contenedor ya se encuentra en ejecución."
+                )
+                self.btn_stop.setToolTip(
+                    "Detiene y elimina el contenedor Docker en ejecución."
+                )
                 self.prog_bar.setRange(0, 100)
                 self.prog_bar.setValue(100)
                 self.lbl_progress.setText("Contenedor en ejecución")
             else:
+                self.btn_launch.setToolTip(
+                    "La simulación o contenedor ya se encuentra en ejecución."
+                )
+                self.btn_stop.setToolTip(
+                    "Detiene y elimina el contenedor Docker en ejecución."
+                )
                 if not getattr(self, "_simulation_ready", False):
                     self.prog_bar.setRange(0, 0)
                     self.lbl_progress.setText("Inicializando Gazebo...")
@@ -1420,6 +1454,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                     self.prog_bar.setValue(100)
                     self.lbl_progress.setText("Simulación en ejecución")
         else:
+            self._is_physical_rviz_mode = False
             self.prog_bar.setRange(0, 100)
             self.prog_bar.setValue(0)
             self.lbl_progress.setText("Listo")
@@ -1430,6 +1465,12 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 )
             else:
                 self.btn_launch.setToolTip("Inicia la simulación ROS 2 seleccionada")
+
+        if hasattr(self, "physical_tab"):
+            self.physical_tab.update_container_state(
+                state == ContainerState.RUNNING,
+                is_physical_rviz=is_physical_rviz,
+            )
 
     def _check_docker_live_status(self, silent: bool = False):
         if self._docker_state == DockerState.STARTING or self._is_closing:
@@ -1882,23 +1923,32 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             self.cbo_scenario.setCurrentIndex(idx)
         self._on_launch_simulation()
 
-    @QtCore.Slot()
-    def _prompt_initial_image_build(self):
-        QtWidgets.QMessageBox.information(
+    def _prompt_initial_image_build(
+        self, on_continue_callback: Callable[[], None] | None = None
+    ):
+        ans = QtWidgets.QMessageBox.question(
             self,
             "Preparación de Imagen Docker",
             f"La imagen '{COURSE_IMAGE_NAME}' no existe localmente.\n\n"
-            "Se procederá a compilarla. Este proceso puede tardar unos minutos la primera vez.\n"
-            "Al finalizar, la simulación se iniciará automáticamente.",
+            "Se procederá a compilarla. Este proceso puede tardar varios minutos la primera vez.\n"
+            "Al finalizar, la ejecución continuará automáticamente.\n\n"
+            "¿Deseas iniciar la preparación de la imagen ahora?",
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No,
         )
-        self._on_pull_or_build_image(
-            on_success_callback=lambda: self._on_launch_simulation(
-                skip_update_check=True
-            )
-        )
+        if ans != QtWidgets.QMessageBox.StandardButton.Yes:
+            self._append_log("[INFO] Preparación de imagen cancelada por el usuario.\n")
+            self._set_progress(0.0, "Cancelado")
+            return
 
-    @QtCore.Slot()
-    def _prompt_update_and_rebuild_image(self):
+        resume_action = on_continue_callback or (
+            lambda: self._on_launch_simulation(skip_update_check=True)
+        )
+        self._on_pull_or_build_image(on_success_callback=resume_action)
+
+    def _prompt_update_and_rebuild_image(
+        self, on_continue_callback: Callable[[], None] | None = None
+    ):
         msg_box = QtWidgets.QMessageBox(self)
         msg_box.setWindowTitle("Actualización del Entorno Docker")
         msg_box.setIcon(QtWidgets.QMessageBox.Icon.Information)
@@ -1906,7 +1956,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             "Se han detectado actualizaciones en la configuración del contenedor (DOCKERFILE_CONTENT).\n\n"
             "¿Deseas actualizar la imagen Docker ahora?\n\n"
             "• Utilizará la caché local de Docker (solo descargará/compilará las capas nuevas).\n"
-            "• La simulación se iniciará automáticamente al completar la actualización."
+            "• La ejecución continuará automáticamente al completar la actualización."
         )
         btn_update = msg_box.addButton(
             "Actualizar ahora (Recomendado)",
@@ -1921,19 +1971,19 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         msg_box.setDefaultButton(btn_update)
         msg_box.exec()
 
+        resume_action = on_continue_callback or (
+            lambda: self._on_launch_simulation(skip_update_check=True)
+        )
+
         clicked = msg_box.clickedButton()
         if clicked == btn_update:
             self._append_log("[INFO] Iniciando actualización de capas Docker...\n")
-            self._on_pull_or_build_image(
-                on_success_callback=lambda: self._on_launch_simulation(
-                    skip_update_check=True
-                )
-            )
+            self._on_pull_or_build_image(on_success_callback=resume_action)
         elif clicked == btn_skip:
             self._append_log(
                 "[AVISO] Continuando con la imagen actual sin actualizar capas.\n"
             )
-            self._on_launch_simulation(skip_update_check=True)
+            resume_action()
         else:
             self._append_log("[INFO] Inicio cancelado por el usuario.\n")
             self._set_progress(0.0, "Cancelado")
@@ -1986,6 +2036,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         self.tab_widget.setCurrentIndex(1)  # Tab Logs
         self._append_log("\n" + "=" * 50 + f"\n{title_msg}\n" + "=" * 50 + "\n")
 
+        self._is_physical_rviz_mode = False
         # Disable both buttons immediately by entering STARTING state
         self.sig_container_status.emit(ContainerState.STARTING)
 
@@ -1996,10 +2047,12 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                         f"Imagen '{image_name}' no encontrada localmente. Iniciando preparación...\n"
                     )
                     self.sig_container_status.emit(ContainerState.NOT_RUNNING)
-                    QtCore.QMetaObject.invokeMethod(
-                        self,
-                        "_prompt_initial_image_build",
-                        QtCore.Qt.ConnectionType.QueuedConnection,
+                    self.run_on_main_thread(
+                        lambda: self._prompt_initial_image_build(
+                            on_continue_callback=lambda: self._on_launch_simulation(
+                                skip_update_check=True
+                            )
+                        )
                     )
                     return
 
@@ -2015,10 +2068,12 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                         f"[AVISO] Se detectaron modificaciones en DOCKERFILE_CONTENT pendientes de aplicar a la imagen '{image_name}'.\n"
                     )
                     self.sig_container_status.emit(ContainerState.NOT_RUNNING)
-                    QtCore.QMetaObject.invokeMethod(
-                        self,
-                        "_prompt_update_and_rebuild_image",
-                        QtCore.Qt.ConnectionType.QueuedConnection,
+                    self.run_on_main_thread(
+                        lambda: self._prompt_update_and_rebuild_image(
+                            on_continue_callback=lambda: self._on_launch_simulation(
+                                skip_update_check=True
+                            )
+                        )
                     )
                     return
 
@@ -2125,17 +2180,17 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                         self._append_log(
                             "Abriendo terminal nativa conectada al contenedor...\n"
                         )
-                        QtCore.QTimer.singleShot(1000, self._on_open_terminal)
+                        self.run_on_main_thread(self._on_open_terminal, delay_ms=1000)
                     else:
-                        QtCore.QTimer.singleShot(1500, self._open_web_gui)
+                        self.run_on_main_thread(self._open_web_gui, delay_ms=1500)
                 else:
                     if self.active_sim_thread and self.active_sim_thread.isRunning():
                         # Si sigue corriendo el proceso aunque docker ps tardara, pasamos a RUNNING
                         self.sig_container_status.emit(ContainerState.RUNNING)
                         if scenario_id in (ScenarioId.CONTAINER_ONLY.value, "bash"):
-                            QtCore.QTimer.singleShot(1000, self._on_open_terminal)
+                            self.run_on_main_thread(self._on_open_terminal, delay_ms=1000)
                         else:
-                            QtCore.QTimer.singleShot(1500, self._open_web_gui)
+                            self.run_on_main_thread(self._open_web_gui, delay_ms=1500)
                     else:
                         self.sig_container_status.emit(ContainerState.NOT_RUNNING)
 
@@ -2146,7 +2201,10 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         threading.Thread(target=_worker, daemon=True).start()
 
     def launch_physical_robot_rviz(
-        self, robot_ip: str | None = None, domain_id: str | None = None
+        self,
+        robot_ip: str | None = None,
+        domain_id: str | None = None,
+        skip_update_check: bool = False,
     ):
         """
         Inicia el contenedor Docker con RViz2 configurado para conectarse al TurtleBot 4
@@ -2169,6 +2227,12 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             )
             return
 
+        web_port = (
+            self.ent_web_port.text().strip()
+            if hasattr(self, "ent_web_port") and self.ent_web_port.text().strip()
+            else str(DEFAULT_NOVNC_PORT)
+        )
+
         if self._docker_state == DockerState.STARTING:
             self._show_warning_box(
                 "Docker",
@@ -2180,6 +2244,12 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
             return
 
         if self._container_state == ContainerState.RUNNING:
+            if getattr(self, "_is_physical_rviz_mode", False):
+                self._append_log(
+                    f"\n[INFO] RViz2 ya está en ejecución. Abriendo interfaz web noVNC: http://localhost:{web_port}/vnc.html\n"
+                )
+                self._open_web_gui()
+                return
             ans = QtWidgets.QMessageBox.question(
                 self,
                 "Contenedor en ejecución",
@@ -2219,11 +2289,6 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 or "0"
             )
         )
-        web_port = (
-            self.ent_web_port.text().strip()
-            if hasattr(self, "ent_web_port") and self.ent_web_port.text().strip()
-            else str(DEFAULT_NOVNC_PORT)
-        )
         ws_path = (
             self.ent_ws_path.text().strip()
             if hasattr(self, "ent_ws_path")
@@ -2240,6 +2305,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
         )
         self._append_log("=" * 55 + "\n")
 
+        self._is_physical_rviz_mode = True
         self.sig_container_status.emit(ContainerState.STARTING)
 
         def _worker():
@@ -2248,11 +2314,36 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                     self._append_log(
                         f"Imagen '{image_name}' no encontrada localmente. Iniciando preparación...\n"
                     )
+                    self._is_physical_rviz_mode = False
                     self.sig_container_status.emit(ContainerState.NOT_RUNNING)
-                    QtCore.QMetaObject.invokeMethod(
-                        self,
-                        "_prompt_initial_image_build",
-                        QtCore.Qt.ConnectionType.QueuedConnection,
+                    self.run_on_main_thread(
+                        lambda: self._prompt_initial_image_build(
+                            on_continue_callback=lambda: self.launch_physical_robot_rviz(
+                                ip_to_use, dom_to_use, skip_update_check=True
+                            )
+                        )
+                    )
+                    return
+
+                expected_hash = DockerService.compute_dockerfile_hash(
+                    DOCKERFILE_CONTENT
+                )
+                stored_hash = self.config_store.get("dockerfile_content_hash")
+                is_up_to_date = DockerService.is_image_up_to_date(
+                    image_name, expected_hash, fallback_hash=stored_hash
+                )
+                if not is_up_to_date and not skip_update_check:
+                    self._append_log(
+                        f"[AVISO] Se detectaron modificaciones en DOCKERFILE_CONTENT pendientes de aplicar a la imagen '{image_name}'.\n"
+                    )
+                    self._is_physical_rviz_mode = False
+                    self.sig_container_status.emit(ContainerState.NOT_RUNNING)
+                    self.run_on_main_thread(
+                        lambda: self._prompt_update_and_rebuild_image(
+                            on_continue_callback=lambda: self.launch_physical_robot_rviz(
+                                ip_to_use, dom_to_use, skip_update_check=True
+                            )
+                        )
                     )
                     return
 
@@ -2283,12 +2374,14 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                     self._append_log(
                         f"\n[El proceso RViz2 finalizó con código de salida {rc}]\n"
                     )
+                    self._is_physical_rviz_mode = False
                     self.sig_container_status.emit(ContainerState.NOT_RUNNING)
 
                 def _on_sim_error(err):
                     self._append_log(
                         f"\n[Error durante la ejecución de RViz2: {err}]\n"
                     )
+                    self._is_physical_rviz_mode = False
                     self.sig_container_status.emit(ContainerState.NOT_RUNNING)
 
                 self._simulation_ready = False
@@ -2318,21 +2411,25 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                     elapsed += poll_interval
 
                 if container_started:
+                    self._simulation_ready = True
                     self.sig_container_status.emit(ContainerState.RUNNING)
                     self._append_log(
                         f"\n=== Servidor Web noVNC listo: http://localhost:{web_port}/vnc.html ===\n"
                         "Visualizando topics del TurtleBot 4 físico en RViz2.\n"
                     )
-                    QtCore.QTimer.singleShot(1500, self._open_web_gui)
+                    self.run_on_main_thread(self._open_web_gui, delay_ms=1500)
                 else:
                     if self.active_sim_thread and self.active_sim_thread.isRunning():
+                        self._simulation_ready = True
                         self.sig_container_status.emit(ContainerState.RUNNING)
-                        QtCore.QTimer.singleShot(1500, self._open_web_gui)
+                        self.run_on_main_thread(self._open_web_gui, delay_ms=1500)
                     else:
+                        self._is_physical_rviz_mode = False
                         self.sig_container_status.emit(ContainerState.NOT_RUNNING)
             except Exception as e:
                 logger.exception("Error al iniciar RViz2 para robot físico: %s", e)
                 self._append_log(f"[Error] No se pudo iniciar el contenedor: {e}\n")
+                self._is_physical_rviz_mode = False
                 self.sig_container_status.emit(ContainerState.NOT_RUNNING)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -2627,7 +2724,7 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
                 self._append_log(
                     "[INFO] Reanudando lanzamiento tras actualizar la imagen...\n"
                 )
-                QtCore.QTimer.singleShot(300, cb)
+                self.run_on_main_thread(cb, delay_ms=300)
             else:
                 QtWidgets.QMessageBox.information(
                     self,
@@ -2728,6 +2825,30 @@ class ModernSimulationLauncher(QtWidgets.QMainWindow):
     # -----------------------------------------------------------------------
     # Logging Console & Helpers
     # -----------------------------------------------------------------------
+
+    @QtCore.Slot(object)
+    def _run_on_main_slot(self, fn: Callable[[], None]):
+        try:
+            fn()
+        except Exception as e:
+            logger.exception("Error al ejecutar acción en el hilo principal: %s", e)
+
+    def run_on_main_thread(self, fn: Callable[[], None], delay_ms: int = 0):
+        """
+        Ejecuta de forma segura un callback en el hilo principal de la interfaz Qt.
+        Si se especifica delay_ms > 0, programa un QTimer en el hilo principal.
+        Seguro para invocar desde cualquier hilo (worker o principal).
+        """
+        def _target():
+            if delay_ms > 0:
+                QtCore.QTimer.singleShot(delay_ms, fn)
+            else:
+                fn()
+
+        if QtCore.QThread.currentThread() == self.thread():
+            _target()
+        else:
+            self.sig_run_on_main.emit(_target)
 
     @QtCore.Slot(str)
     def _append_log(self, text: str):

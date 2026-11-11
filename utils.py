@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -293,7 +294,7 @@ def subnet_sweep(local_ip: str, timeout: float = 0.35) -> None:
 
 
 # ---------------------------------------------------------------------------
-# SFTP recursive upload
+# SFTP incremental synchronization (rsync-like)
 # ---------------------------------------------------------------------------
 
 _SFTP_IGNORE_DIRS = {
@@ -309,45 +310,253 @@ _SFTP_IGNORE_DIRS = {
 }
 
 
-def sftp_upload_dir(sftp, local_dir: Path, remote_dir: str, log_cb=None) -> int:
-    """Recursively uploads a local directory to a remote directory via SFTP."""
+class SyncStats(int):
+    """
+    Statistics for incremental SFTP synchronization (rsync-like).
+    Inherits from int so `int(stats)` and `stats == uploaded` work seamlessly for backward compatibility.
+    """
 
-    def _remote_mkdir_p(path: str):
-        clean = path.replace("\\", "/")
-        parts = clean.strip("/").split("/")
-        cur = "/" if clean.startswith("/") else ""
-        for p in parts:
-            cur = f"{cur.rstrip('/')}/{p}"
+    uploaded: int
+    skipped: int
+    deleted: int
+
+    def __new__(cls, uploaded: int = 0, skipped: int = 0, deleted: int = 0):
+        obj = super().__new__(cls, uploaded)
+        obj.uploaded = uploaded
+        obj.skipped = skipped
+        obj.deleted = deleted
+        return obj
+
+    @property
+    def total_processed(self) -> int:
+        return self.uploaded + self.skipped
+
+    def __repr__(self) -> str:
+        return (
+            f"SyncStats(uploaded={self.uploaded}, skipped={self.skipped}, "
+            f"deleted={self.deleted})"
+        )
+
+
+def _remote_mkdir_p(sftp, path: str, created_dirs: set[str] | None = None):
+    """Recursively creates remote directories via SFTP, caching created paths."""
+    clean = path.replace("\\", "/").rstrip("/")
+    if not clean:
+        return
+    parts = [p for p in clean.split("/") if p]
+    cur = "/" if clean.startswith("/") else ""
+    for p in parts:
+        cur = f"{cur.rstrip('/')}/{p}"
+        if created_dirs is not None and cur in created_dirs:
+            continue
+        try:
+            sftp.stat(cur)
+        except OSError:
             try:
-                sftp.stat(cur)
+                sftp.mkdir(cur)
             except OSError:
-                try:
-                    sftp.mkdir(cur)
-                except OSError:
-                    pass
+                pass
+        if created_dirs is not None:
+            created_dirs.add(cur)
 
-    _remote_mkdir_p(remote_dir)
-    file_count = 0
+
+def _remote_rmtree(sftp, rpath: str) -> int:
+    """Recursively removes a remote directory via SFTP. Returns count of deleted entries."""
+    clean = rpath.replace("\\", "/").rstrip("/")
+    count = 0
+    try:
+        items = sftp.listdir_attr(clean)
+    except OSError:
+        return count
+
+    for attr in items:
+        item_path = f"{clean}/{attr.filename}"
+        if stat.S_ISDIR(attr.st_mode):
+            count += _remote_rmtree(sftp, item_path)
+        else:
+            try:
+                sftp.remove(item_path)
+                count += 1
+            except OSError:
+                pass
+    try:
+        sftp.rmdir(clean)
+        count += 1
+    except OSError:
+        pass
+    return count
+
+
+def sftp_upload_dir(
+    sftp,
+    local_dir: Path,
+    remote_dir: str,
+    delete_stale: bool = False,
+    log_cb=None,
+) -> SyncStats:
+    """
+    Synchronizes a local directory to a remote directory via SFTP incrementally (rsync-like).
+
+    - Compares file size and modification time (mtime) to avoid re-uploading unchanged files.
+    - Preserves file modification time on the remote server via sftp.utime().
+    - If delete_stale is True, removes files/directories in remote_dir that do not exist locally.
+    - Skips directories/files defined in _SFTP_IGNORE_DIRS (e.g. .git, build, install, __pycache__).
+
+    Returns a SyncStats object (subclass of int) containing uploaded, skipped, and deleted counts.
+    """
+    created_dirs: set[str] = set()
+    _remote_mkdir_p(sftp, remote_dir, created_dirs)
+
+    uploaded = 0
+    skipped = 0
+    deleted = 0
     local_p = Path(local_dir).resolve()
 
     for root, dirs, files in os.walk(local_p):
-        dirs[:] = [d for d in dirs if d not in _SFTP_IGNORE_DIRS and not d.startswith(".")]
+        dirs[:] = [
+            d for d in dirs
+            if d not in _SFTP_IGNORE_DIRS and not d.startswith(".")
+        ]
         rel = os.path.relpath(root, local_p).replace("\\", "/")
         dest_sub = remote_dir if rel == "." else f"{remote_dir}/{rel}"
-        _remote_mkdir_p(dest_sub)
+        _remote_mkdir_p(sftp, dest_sub, created_dirs)
+
+        # Retrieve remote directory contents for fast batch comparison
+        try:
+            remote_entries = {
+                attr.filename: attr for attr in sftp.listdir_attr(dest_sub)
+            }
+        except OSError:
+            remote_entries = {}
+
+        local_files_valid = set()
 
         for f in files:
-            if f.endswith((".pyc", ".swp", "~")) or f in _SFTP_IGNORE_DIRS:
+            if f.endswith((".pyc", ".swp", "~")) or f in _SFTP_IGNORE_DIRS or f.startswith("."):
                 continue
+            local_files_valid.add(f)
             src_file = os.path.join(root, f)
             dest_file = f"{dest_sub}/{f}"
-            if log_cb:
-                disp = f if rel == "." else f"{rel}/{f}"
-                log_cb(f"  -> [SCP] {disp}\n")
-            sftp.put(src_file, dest_file)
-            file_count += 1
+            disp = f if rel == "." else f"{rel}/{f}"
 
-    return file_count
+            try:
+                l_stat = os.stat(src_file)
+                l_size = l_stat.st_size
+                l_mtime = int(l_stat.st_mtime)
+            except OSError as e:
+                if log_cb:
+                    log_cb(f"  [Advertencia] No se pudo leer {disp}: {e}\n")
+                continue
+
+            # Compare against existing remote entry
+            r_attr = remote_entries.get(f)
+            if r_attr and stat.S_ISREG(r_attr.st_mode):
+                r_size = getattr(r_attr, "st_size", -1)
+                r_mtime = getattr(r_attr, "st_mtime", 0)
+                # 2-second tolerance for differing filesystem timestamp resolutions
+                if r_size == l_size and abs((r_mtime or 0) - l_mtime) <= 2:
+                    skipped += 1
+                    continue
+
+            action = "Actualizado" if r_attr else "Nuevo"
+            if log_cb:
+                log_cb(f"  -> [{action}] {disp}\n")
+
+            sftp.put(src_file, dest_file)
+            try:
+                sftp.utime(dest_file, (int(l_stat.st_atime), l_mtime))
+            except OSError:
+                pass
+            uploaded += 1
+
+        # Delete remote files/folders that were deleted locally (rsync --delete behavior)
+        if delete_stale:
+            local_dirs_set = set(dirs)
+            for name, r_attr in remote_entries.items():
+                if name in _SFTP_IGNORE_DIRS or name.startswith("."):
+                    continue
+                disp = name if rel == "." else f"{rel}/{name}"
+                if stat.S_ISDIR(r_attr.st_mode):
+                    if name not in local_dirs_set:
+                        del_cnt = _remote_rmtree(sftp, f"{dest_sub}/{name}")
+                        deleted += del_cnt
+                        if log_cb:
+                            log_cb(f"  -> [Eliminado dir] {disp}/\n")
+                elif stat.S_ISREG(r_attr.st_mode):
+                    if name not in local_files_valid:
+                        try:
+                            sftp.remove(f"{dest_sub}/{name}")
+                            deleted += 1
+                            if log_cb:
+                                log_cb(f"  -> [Eliminado] {disp}\n")
+                        except OSError:
+                            pass
+
+    if log_cb and skipped > 0 and uploaded > 0:
+        log_cb(f"  ({skipped} archivos sin cambios omitidos)\n")
+    elif log_cb and skipped > 0 and uploaded == 0 and deleted == 0:
+        log_cb(f"  (Todos los {skipped} archivos ya están actualizados; no fue necesario transferir nada)\n")
+
+    return SyncStats(uploaded=uploaded, skipped=skipped, deleted=deleted)
+
+
+def find_workspace_packages(ws_path: str | Path | None) -> list[tuple[str, Path]]:
+    """
+    Discovers valid ROS 2 package directories within the given workspace path.
+    A directory qualifies if and only if it directly contains a 'package.xml' file.
+    Loose files (e.g. .pdf, .zip, .txt) and directories without 'package.xml' are ignored.
+
+    Returns a sorted list of (package_folder_name, package_path) tuples.
+    """
+    if not ws_path:
+        return []
+    p = Path(ws_path).resolve()
+    if not p.is_dir():
+        return []
+
+    # 1. If the workspace root itself is a package
+    if (p / "package.xml").is_file():
+        return [(p.name, p)]
+
+    search_dir = (p / "src") if (p / "src").is_dir() else p
+    packages: dict[str, Path] = {}
+
+    # 2. Check direct subdirectories under search_dir
+    try:
+        for entry in search_dir.iterdir():
+            if not entry.is_dir() or entry.name.startswith("."):
+                continue
+            if entry.name in _SFTP_IGNORE_DIRS:
+                continue
+            if (entry / "package.xml").is_file():
+                packages[entry.name] = entry
+    except Exception:
+        pass
+
+    # 3. If no direct subdirectories had package.xml, search deeper (nested packages)
+    if not packages:
+        try:
+            for pkg_xml in search_dir.rglob("package.xml"):
+                pkg_dir = pkg_xml.parent
+                try:
+                    rel_parts = pkg_dir.relative_to(search_dir).parts
+                except ValueError:
+                    continue
+                if any(ign in rel_parts for ign in _SFTP_IGNORE_DIRS):
+                    continue
+                packages[pkg_dir.name] = pkg_dir
+        except Exception:
+            pass
+
+    return sorted(packages.items(), key=lambda item: item[0])
+
+
+def get_local_package_names(ws_path: str | Path | None) -> set[str]:
+    """
+    Scans a local workspace and returns the set of ROS 2 package folder names.
+    Ignores loose files (.pdf, .zip, etc.) and folders without package.xml.
+    """
+    return {name for name, _ in find_workspace_packages(ws_path)}
 
 
 # ---------------------------------------------------------------------------
