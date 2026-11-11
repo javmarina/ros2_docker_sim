@@ -733,6 +733,7 @@ RUN echo "=== [1/3] Actualizando repositorios APT ===" && \
         ros-humble-ros2-control \
         ros-humble-ros2-controllers \
         ros-humble-rmw-cyclonedds-cpp \
+        ros-humble-aruco-msgs \
         python3-colcon-common-extensions \
         python3-rosdep \
         x11-apps \

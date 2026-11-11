@@ -31,6 +31,7 @@ RUN echo "=== [1/3] Actualizando repositorios APT ===" && \
         ros-humble-ros2-control \
         ros-humble-ros2-controllers \
         ros-humble-rmw-cyclonedds-cpp \
+        ros-humble-aruco-msgs \
         python3-colcon-common-extensions \
         python3-rosdep \
         x11-apps \
@@ -76,6 +77,6 @@ WORKDIR /ros2_ws
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc \
     && echo "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi" >> /root/.bashrc
 
-LABEL org.nav_course.dockerfile_hash="0d96433f96480d9f"
+LABEL org.nav_course.dockerfile_hash="77952327b8e17045"
 
 CMD ["/bin/bash"]

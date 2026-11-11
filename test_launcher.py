@@ -100,6 +100,7 @@ def test_dockerfile_sync():
         content = target_file.read_text(encoding="utf-8")
         assert "ros:humble-desktop-full" in content
         assert "ros-humble-rmw-cyclonedds-cpp" in content
+        assert "ros-humble-aruco-msgs" in content
         assert "RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" in content
         assert "ROS_DOMAIN_ID=0" in content
         assert "org.nav_course.assets_digest" in content
